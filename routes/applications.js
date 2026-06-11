@@ -1,14 +1,24 @@
 const express = require('express');
 const router = express.Router();
-const { submitApplication, saveDraft, getMyApplication, getAllApplications, updateApplicationStatus, filterApplications } = require('../controllers/application.controller');
-const verifyToken = require('../middleware/verifyToken');
-const authorizeRole = require('../middleware/authorizeRole');
+const {
+  submitApplication,
+  saveDraft,
+  getMyApplication,
+  getAllApplications,
+  updateApplicationStatus,
+  filterApplications
+} = require('../../controllers/applicationController');
+const { protect } = require('../../middleware/authMiddleware');
+const { adminOnly, studentOnly } = require('../../middleware/roleCheckerMiddleware');
 
-router.post('/', verifyToken, authorizeRole('student'), submitApplication);
-router.put('/:id/draft', verifyToken, authorizeRole('student'), saveDraft);
-router.get('/my', verifyToken, authorizeRole('student'), getMyApplication);
-router.get('/admin/all', verifyToken, authorizeRole('admin'), getAllApplications);
-router.put('/admin/:id', verifyToken, authorizeRole('admin'), updateApplicationStatus);
-router.get('/admin/filter', verifyToken, authorizeRole('admin'), filterApplications);
+// STUDENT ROUTES
+router.post('/', protect, studentOnly, submitApplication);
+router.put('/:id/draft', protect, studentOnly, saveDraft);
+router.get('/my', protect, studentOnly, getMyApplication);
+
+// ADMIN ROUTES
+router.get('/admin/all', protect, adminOnly, getAllApplications);
+router.put('/admin/:id', protect, adminOnly, updateApplicationStatus);
+router.get('/admin/filter', protect, adminOnly, filterApplications);
 
 module.exports = router;
