@@ -1,13 +1,42 @@
-// controllers/courseController.js
 const Course = require('../models/course');
+const Institution = require('../models/Institution);
+
+// HELPER FUNCTION - RESOLVE TENANT ID FROM SUBDOMAIN
+const resolveTenantFromSubdomain = async (req) => {
+    const host = req.headers.host;
+    if(!host) {
+        return null;
+    }
+
+    // FOR THE DEVELOPMENT PHASE ONLY
+    let subdomain = host.split('.')[0];
+    if(subdomain === 'localhost' || subdomain === '127.0.0.1' || subdomain === 'www') {
+        if(process.env.DEFAULT_TENANT_ID) {
+            return process.env.DEFAULT_TENANT_ID;
+        }
+        return null;
+    }
+
+    const institution = await Institution.findOne({ subdomain }).select('_.id');
+    if(!institution) {
+        return null;
+    }
+    return institution._id;
+};
 
 // CREATE A NEW COURSE - ONLY INSTITUTION ADMIN
 const createCourse = async (req, res) => {
     try {
         // GET TENANT ID FROM AUTHENTICATED USER
         const tenantId = req.user.tenantId;
+        if(!tenantId) {
+            return res.status(403).json({
+                success : false,
+                message : 'Admin does not belong to any institution'
+            });
+        }
 
-        const { name, eligibilityCriteria, capacity, requiredDocuments } = req.body;
+        const { name, eligibilityCriteria, admissionCapacity, requiredDocuments, session, description } = req.body;
 
         if(!name) {
             return res.status(400).json({
@@ -17,8 +46,8 @@ const createCourse = async (req, res) => {
         }
 
         // CHECK IF COURSE ALREADY EXISTS UNDER THIS TENANT
-        const existing = await Course.findOne({ name, tenantId });
-        if(existing) {
+        const existingCourse = await Course.findOne({ name, tenantId });
+        if(existingCourse) {
             return res.status(400).json({
                 success : false,
                 message : 'Course with this name already exists for your institution'
@@ -28,16 +57,19 @@ const createCourse = async (req, res) => {
         // CREATE NEW COURSE
         const course = await Course.create({
             name,
+            description : description || '',
             tenantId,
-            eligibilityCriteria,
-            capacity,
-            requiredDocuments
+            eligibilityCriteria : eligibilityCriteria || {},
+            admissionCapacity : adissionCapacity || 0,
+            requiredDocuments : requiredDocuments || [],
+            session : session || '',
+            createdBy : req.user.id
         });
 
         res.status(201).json({
             success : true,
             message : 'Course created successfully',
-            course
+            data : course
         });
     } catch (err) {
         res.status(500).json({
@@ -50,14 +82,20 @@ const createCourse = async (req, res) => {
 // GET ALL COURSES FOR THE CURRENT TENANT
 const getCourses = async (req, res) => {
     try {
-        const tenantId = req.user.tenantId;
+        const tenantId = await resolveTenantFromSubmission(req);
+        if(!tenantId) {
+            return res.status(400).json({
+                success : false,
+                message : 'Invalid institution subdomain'
+            });
+        }
 
-        const courses = await Course.find({ tenantId });
+        const courses = await Course.find({ tenantId }).sort({ createdAt : -1 });
 
         res.status(200).json({
             success : true,
             count : courses.length,
-            courses
+            data : courses
         });
     } catch (err) {
         res.status(500).json({
@@ -70,10 +108,15 @@ const getCourses = async (req, res) => {
 // GET SINGLE COURSE BY ID - WITHIN TENANT
 const getCourseById = async (req, res) => {
     try {
-        const tenantId = req.user.tenantId;
+        const tenantId = await resolveTenantFromSubdomain(req);
+        if(!tenantId) {
+            return res.status(400).json({
+                success : false,
+                message : 'Invalid Institution subdomain'
+            });
+        }
 
-        const course = await Course.findOne({ _id : req.params.id, tenantId });
-
+        const course = await Course.findOne({ _id : req.params.id, tenantId: tenantId });
         if(!course) {
             return res.status(404).json({
                 success : false,
@@ -83,7 +126,7 @@ const getCourseById = async (req, res) => {
 
         res.status(200).json({
             success : true,
-            course
+            data : course
         });
     } catch (err) {
         res.status(500).json({
@@ -97,9 +140,14 @@ const getCourseById = async (req, res) => {
 const updateCourse = async (req, res) => {
     try {
         const tenantId = req.user.tenantId;
+        if(!tenantId) {
+            return res.status(403).json({
+                success : false,
+                message : 'Admin does not belong to any institution'
+            });
+        }
 
-        const course = await Course.findOne({ _id : req.params.id, tenantId });
-
+        const course = await Course.findOne({ _id : req.params.id, tenantId: tenantId });
         if(!course) {
             return res.status(404).json({
                 success : false,
@@ -108,19 +156,21 @@ const updateCourse = async (req, res) => {
         }
 
         // UPDATE ALLOWED FIELDS ONLY
-        const { name, eligibilityCriteria, capacity, requiredDocuments } = req.body;
+        const { name, description, eligibilityCriteria, admissionCapacity, requiredDocuments, session } = req.body;
 
         if(name) course.name = name;
+        if(description) course.description = description;
         if(eligibilityCriteria) course.eligibilityCriteria = eligibilityCriteria;
-        if(capacity) course.capacity = capacity;
+        if(admissionCapacity) course.admissionCapacity = admissionCapacity;
         if(requiredDocuments) course.requiredDocuments = requiredDocuments;
+        if(session) course.session = session;
 
         await course.save();
 
         res.status(200).json({
             success : true,
             message : 'Course updated successfully',
-            course
+            data : course
         });
     } catch (err) {
         res.status(500).json({
@@ -134,17 +184,20 @@ const updateCourse = async (req, res) => {
 const deleteCourse = async (req, res) => {
     try {
         const tenantId = req.user.tenantId;
+        if(!tenantId) {
+            return res.status(403).json({
+                success : false,
+                message : 'Admin does not belong to any institution'
+            });
+        }
 
-        const course = await Course.findOne({ _id : req.params.id, tenantId });
-
+        const course = await Course.findOneAndDelete({ _id : req.params.id, tenantId: tenantId });
         if(!course) {
             return res.status(404).json({
                 success : false,
                 message : 'Course not found'
             });
         }
-
-        await course.deleteOne();
 
         res.status(200).json({
             success : true,
