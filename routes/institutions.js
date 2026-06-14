@@ -1,18 +1,22 @@
 const express = require('express');
 const router = express.Router();
 const {
+  getInstitutions,
+  getInstitutionById,
   createInstitution,
-  getInstitution,
   updateInstitution,
   deleteInstitution
 } = require('../../controllers/institutionController');
 const { protect } = require('../../middleware/authMiddleware');
-const { superAdminOnly } = require('../../middleware/roleCheckerMiddleware');
+const { superAdminOnly, adminOnly } = require('../../middleware/roleCheckerMiddleware');
 
 // PROTECTED ROUTES - SUPER ADMIN ONLY
+router.get('/', protect, superAdminOnly, getInstitutions);
 router.post('/', protect, superAdminOnly, createInstitution);
-router.get('/:id', protect, getInstitution);
-router.put('/:id', protect, superAdminOnly, updateInstitution);
 router.delete('/:id', protect, superAdminOnly, deleteInstitution);
+
+// PROTECTED ROUTES - FOR BOTH SUPER ADMIN AND INSTITUTION ADMINS
+router.get('/:id', protect, adminOnly, getInstitutionById);
+router.put('/:id', protect, adminOnly, updateInstitution);
 
 module.exports = router;
