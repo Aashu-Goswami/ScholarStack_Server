@@ -8,13 +8,13 @@ const {
 const { protect } = require('../../middleware/authMiddleware');
 const { adminOnly, studentOnly } = require('../../middleware/roleCheckerMiddleware');
 
-// STUDENT ROUTES
+// PUBLIC ROUTE
 router.post('/upload', protect, studentOnly, uploadDocument);
 
-// SHARED - STUDENT AND ADMIN
+// SHARED - STUDENT AND INSTITUTION ADMIN
 router.get('/:applicationId', protect, getDocuments);
 
-// ADMIN ONLY
+// INSTITUTION ADMIN ONLY
 router.put('/:id/status', protect, adminOnly, updateDocumentStatus);
 
 module.exports = router;

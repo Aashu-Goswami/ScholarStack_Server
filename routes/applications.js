@@ -11,7 +11,7 @@ const {
 const { protect } = require('../../middleware/authMiddleware');
 const { adminOnly, studentOnly } = require('../../middleware/roleCheckerMiddleware');
 
-// STUDENT ROUTES
+// PUBLIC ROUTES
 router.post('/', protect, studentOnly, submitApplication);
 router.put('/:id/draft', protect, studentOnly, saveDraft);
 router.get('/my', protect, studentOnly, getMyApplication);
