@@ -1,14 +1,12 @@
 const Application = require('../models/application');
 const { classifyApplication } = require('../services/classificationEngine');
 
-// GET SINGLE APPLICATION CLASSIFICATION - APPLICANT OR ADMIN (WITHIN TENANT)
 const getClassificationByApplicationId = async (req, res) => {
     try {
-        const tenantId = req.user.tenantId; // resolved from auth token
+        const tenantId = req.user.tenantId;
         const filter = { _id: req.params.id };
 
-        // Non-admins can only check their own classification details
-        if (req.user.role !== 'instAdmin' && req.user.role !== 'superAdmin') {
+        if (req.user.role !== 'instAdmin' && req.user.role !== 'superAdmin' && req.user.role !== 'admin') {
             filter.applicantId = req.user.id;
         } else if (tenantId) {
             filter.tenantId = tenantId;
@@ -45,7 +43,6 @@ const getClassificationByApplicationId = async (req, res) => {
     }
 };
 
-// BULK CLASSIFICATION REPORT - ADMIN ONLY
 const bulkClassifyApplications = async (req, res) => {
     try {
         const tenantId = req.user.tenantId;
