@@ -44,7 +44,7 @@ const registerStudent = async (req, res) => {
     try {
         // GET NAME, EMAIL, PASSWORD FROM REQUEST
         const { name, email, password } = req.body;
-        if(!name, !email, !password) {
+        if(!name || !email || !password) {
             return res.status(400).json({
                 success : false,
                 message : 'Please provide name, email and password'
@@ -173,7 +173,7 @@ const login = async (req, res) => {
             });
         }
 
-        const token = generateToken(user._id, user.role, user.tenantId || null) 
+        const token = generateToken(user._id, user.role, user.tenantId || null); 
         res.status(200).json({
             success : true,
             token,
@@ -202,7 +202,10 @@ const forgotPassword = async (req, res) => {
         try {
             tenantId = await resolveTenant(req);
         } catch (err) {
-            return res.status(500).json({ success : false, message : err.message });
+            return res.status(500).json({ 
+                success : false, 
+                message : err.message 
+            });
         }
 
         // FIND USER WITH THE TENANT ID AND SPECIFIC EMAIL
