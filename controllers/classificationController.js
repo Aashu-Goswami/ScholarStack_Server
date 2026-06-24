@@ -1,12 +1,14 @@
 const Application = require('../models/application');
 const { classifyApplication } = require('../services/classificationEngine');
 
+// GET SINGLE APPLICATION CLASSIFICATION - APPLICANT OR ADMIN (WITHIN TENANT)
 const getClassificationByApplicationId = async (req, res) => {
     try {
-        const tenantId = req.user.tenantId;
+        const tenantId = req.user.tenantId; // resolved from auth token
         const filter = { _id: req.params.id };
 
-        if (req.user.role !== 'instAdmin' && req.user.role !== 'superAdmin' && req.user.role !== 'admin') {
+        // Non-admins can only check their own classification details
+        if (req.user.role !== 'instAdmin' && req.user.role !== 'superAdmin') {
             filter.applicantId = req.user.id;
         } else if (tenantId) {
             filter.tenantId = tenantId;
@@ -30,8 +32,12 @@ const getClassificationByApplicationId = async (req, res) => {
             data: {
                 applicationId: application._id,
                 status: application.status,
-                category: application.personalDetails ? application.personalDetails.category : 'General',
-                academicMarks: application.personalDetails ? application.personalDetails.academicMarks : 0,
+                category: application.personalDetails
+                    ? application.personalDetails.category
+                    : 'General',
+                academicMarks: application.personalDetails
+                    ? application.personalDetails.academicMarks
+                    : 0,
                 classificationTags: tags
             }
         });
@@ -43,6 +49,7 @@ const getClassificationByApplicationId = async (req, res) => {
     }
 };
 
+// BULK CLASSIFICATION REPORT - ADMIN ONLY
 const bulkClassifyApplications = async (req, res) => {
     try {
         const tenantId = req.user.tenantId;
@@ -62,8 +69,12 @@ const bulkClassifyApplications = async (req, res) => {
             const tags = classifyApplication(app);
             return {
                 applicationId: app._id,
-                applicantName: app.applicantId ? app.applicantId.name : 'Unknown',
-                courseName: app.courseId ? app.courseId.name : 'Unknown',
+                applicantName: app.applicantId
+                    ? app.applicantId.name
+                    : 'Unknown',
+                courseName: app.courseId
+                    ? app.courseId.name
+                    : 'Unknown',
                 status: app.status,
                 classificationTags: tags
             };
