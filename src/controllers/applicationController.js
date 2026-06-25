@@ -6,9 +6,9 @@
  * and in-app alerts on submissions, verifications, and admission approvals/rejections.
  */
 
-const Application = require('../models/Application');
+const Application = require('../models/application');
 const Course = require('../models/course');
-const Institution = require('../models/Institution');
+const Institution = require('../models/institution');
 
 // HELPER FUNCTION - RESOLVE TENANT ID FROM SUBDOMAIN
 const resolveTenantFromSubdomain = async (req) => {
