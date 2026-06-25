@@ -33,7 +33,7 @@ const getInstitutionById = async (req, res) => {
             });
         }
 
-        // PERMISSON CHECK - SUPER ADMIN ALLOWED, INSITUTION ADMIN ONLY IF TENANT ID MATCHES
+        // PERMISSION CHECK - SUPER ADMIN ALLOWED, INSTITUTION ADMIN ONLY IF TENANT ID MATCHES
         if(user.role === 'instAdmin' && user.tenantId.toString() !== id) {
             return res.status(403).json({
                 success : false,
