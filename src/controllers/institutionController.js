@@ -1,5 +1,5 @@
 const Institution = require('../models/institution');
-const User = require('../models/User');
+const User = require('../models/user');
 
 // GET ALL INSTITUTIONS FUNCTION
 const getInstitutions = async (req, res) => {
@@ -28,7 +28,7 @@ const getInstitutionById = async (req, res) => {
         // FETCH INSTITUTION
         const institution = await Institution.findById(id);
         if(!institution) {
-            reutrn res.status(404).json({
+            return res.status(404).json({
                 success : false,
                 message : 'Institution not found'
             });
@@ -131,7 +131,7 @@ const updateInstitution = async (req, res) => {
         if(name) institution.name = name;
         if(logo) institution.logo = logo;
         if(contactEmail) institution.contactEmail = contactEmail;
-        if(contactPhone) instiution.contactPhone = contactPhone;
+        if(contactPhone) institution.contactPhone = contactPhone;
         if(address) institution.address = address;
         if(website) institution.website = website;
         if(admissionSession) institution.admissionSession = admissionSession;

@@ -1,3 +1,11 @@
+/**
+ * @file controllers/applicationController.js
+ * @description Controller handling student admission application CRUD operations (Module 5)
+ * and managing the validation state machine transitions (Module 7).
+ * Connects directly to the notification engine (Module 9) to generate automatic emails
+ * and in-app alerts on submissions, verifications, and admission approvals/rejections.
+ */
+
 const Application = require('../models/Application');
 const Course = require('../models/course');
 const Institution = require('../models/Institution');
@@ -25,7 +33,7 @@ const resolveTenantFromSubdomain = async (req) => {
     return institution._id;
 };
 
-// CREATE A NEW APPLICATION - APPLICANT (PUBLIC/AUTHENTICATED USER)
+// CREATES A NEW APPLICATION - APPLICANT (PUBLIC/AUTHENTICATED USER)
 const createApplication = async (req, res) => {
     try {
         const tenantId = await resolveTenantFromSubdomain(req);
@@ -45,7 +53,7 @@ const createApplication = async (req, res) => {
             });
         }
 
-        // VERIFY THE COURSE EXISTS UNDER THIS TENANT
+        // VERIFIES WETHER THE COURSE EXISTS UNDER THIS TENANT
         const course = await Course.findOne({ _id: courseId, tenantId });
         if (!course) {
             return res.status(404).json({
@@ -54,7 +62,7 @@ const createApplication = async (req, res) => {
             });
         }
 
-        // PREVENT DUPLICATE APPLICATION FOR SAME COURSE BY SAME APPLICANT
+        // PREVENTS DUPLICATE APPLICATION FOR SAME COURSE BY SAME APPLICANT
         const existingApplication = await Application.findOne({
             tenantId,
             courseId,
@@ -74,7 +82,7 @@ const createApplication = async (req, res) => {
             personalDetails: personalDetails || {},
             documents: documents || [],
             session: session || course.session || '',
-            status: 'pending'
+            status: 'draft'
         });
 
         res.status(201).json({
@@ -90,7 +98,7 @@ const createApplication = async (req, res) => {
     }
 };
 
-// GET ALL APPLICATIONS - INSTITUTION ADMIN (ALL), APPLICANT (OWN ONLY)
+// GETS ALL APPLICATIONS - INSTITUTION ADMIN (ALL), APPLICANT (OWN ONLY)
 const getApplications = async (req, res) => {
     try {
         const tenantId = await resolveTenantFromSubdomain(req);
@@ -101,9 +109,9 @@ const getApplications = async (req, res) => {
             });
         }
 
-        // ADMINS SEE ALL APPLICATIONS; APPLICANTS SEE ONLY THEIR OWN
+        // ADMINS CAN SEE ALL APPLICATIONS; APPLICANTS SEE ONLY THEIR OWN
         const filter = { tenantId };
-        if (req.user.role !== 'admin') {
+        if (req.user.role !== 'instAdmin') {
             filter.applicantId = req.user.id;
         }
 
@@ -124,7 +132,7 @@ const getApplications = async (req, res) => {
     }
 };
 
-// GET SINGLE APPLICATION BY ID - WITHIN TENANT
+// GETS SINGLE APPLICATION BY ID - WITHIN TENANT
 const getApplicationById = async (req, res) => {
     try {
         const tenantId = await resolveTenantFromSubdomain(req);
@@ -138,7 +146,7 @@ const getApplicationById = async (req, res) => {
         const filter = { _id: req.params.id, tenantId };
 
         // NON-ADMINS CAN ONLY VIEW THEIR OWN APPLICATION
-        if (req.user.role !== 'admin') {
+        if (req.user.role !== 'instAdmin') {
             filter.applicantId = req.user.id;
         }
 
@@ -163,7 +171,7 @@ const getApplicationById = async (req, res) => {
     }
 };
 
-// UPDATE APPLICATION STATUS - ONLY INSTITUTION ADMIN, WITHIN TENANT
+// UPDATES APPLICATION STATUS - ONLY INSTITUTION ADMIN, WITHIN TENANT
 const updateApplicationStatus = async (req, res) => {
     try {
         const tenantId = req.user.tenantId;
@@ -176,7 +184,7 @@ const updateApplicationStatus = async (req, res) => {
 
         const { status, remarks } = req.body;
 
-        const VALID_STATUSES = ['pending', 'under_review', 'approved', 'rejected', 'waitlisted'];
+        const VALID_STATUSES = ['draft', 'pending', 'under_review', 'verified', 'admitted', 'rejected'];
         if (!status || !VALID_STATUSES.includes(status)) {
             return res.status(400).json({
                 success: false,
@@ -184,11 +192,31 @@ const updateApplicationStatus = async (req, res) => {
             });
         }
 
+        // WORKFLOW VALIDATION - STATUS CAN ONLY MOVE IN CORRECT ORDER
+        const ALLOWED_TRANSITIONS = {
+            draft: ['pending'],
+            pending: ['under_review', 'rejected'],
+            under_review: ['verified', 'rejected'],
+            verified: ['admitted', 'rejected'],
+            admitted: [],
+            rejected: []
+        };
+
         const application = await Application.findOne({ _id: req.params.id, tenantId });
         if (!application) {
             return res.status(404).json({
                 success: false,
                 message: 'Application not found'
+            });
+        }
+
+        const currentStatus = application.status;
+        const allowedNext = ALLOWED_TRANSITIONS[currentStatus];
+
+        if (!allowedNext.includes(status)) {
+            return res.status(400).json({
+                success: false,
+                message: `Cannot move from '${currentStatus}' to '${status}'. Allowed: ${allowedNext.join(', ') || 'none'}`
             });
         }
 
@@ -212,7 +240,7 @@ const updateApplicationStatus = async (req, res) => {
     }
 };
 
-// UPDATE APPLICATION DETAILS - APPLICANT ONLY, ONLY WHILE PENDING
+// UPDATES APPLICATION DETAILS - APPLICANT ONLY, ONLY WHILE DRAFT OR PENDING
 const updateApplication = async (req, res) => {
     try {
         const tenantId = await resolveTenantFromSubdomain(req);
@@ -235,11 +263,11 @@ const updateApplication = async (req, res) => {
             });
         }
 
-        // LOCK EDITS ONCE THE APPLICATION MOVES PAST PENDING
-        if (application.status !== 'pending') {
+        // LOCKS EDITS ONCE THE APPLICATION MOVES PAST PENDING
+        if (application.status !== 'pending' && application.status !== 'draft') {
             return res.status(400).json({
                 success: false,
-                message: 'Only pending applications can be edited'
+                message: 'Only draft or pending applications can be edited'
             });
         }
 
@@ -264,10 +292,10 @@ const updateApplication = async (req, res) => {
     }
 };
 
-// DELETE / WITHDRAW APPLICATION - APPLICANT (OWN, PENDING ONLY) OR ADMIN
+// DELETES / WITHDRAWS APPLICATION - APPLICANT (OWN, PENDING ONLY) OR ADMIN
 const deleteApplication = async (req, res) => {
     try {
-        const tenantId = req.user.role === 'admin'
+        const tenantId = req.user.role === 'instAdmin'
             ? req.user.tenantId
             : await resolveTenantFromSubdomain(req);
 
@@ -281,7 +309,7 @@ const deleteApplication = async (req, res) => {
         const filter = { _id: req.params.id, tenantId };
 
         // NON-ADMINS CAN ONLY DELETE THEIR OWN PENDING APPLICATIONS
-        if (req.user.role !== 'admin') {
+        if (req.user.role !== 'instAdmin') {
             filter.applicantId = req.user.id;
             filter.status = 'pending';
         }
@@ -314,3 +342,4 @@ module.exports = {
     updateApplication,
     deleteApplication
 };
+
