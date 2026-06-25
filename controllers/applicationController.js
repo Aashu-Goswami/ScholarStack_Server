@@ -33,7 +33,7 @@ const resolveTenantFromSubdomain = async (req) => {
     return institution._id;
 };
 
-// CREATE A NEW APPLICATION - APPLICANT (PUBLIC/AUTHENTICATED USER)
+// CREATES A NEW APPLICATION - APPLICANT (PUBLIC/AUTHENTICATED USER)
 const createApplication = async (req, res) => {
     try {
         const tenantId = await resolveTenantFromSubdomain(req);
@@ -53,7 +53,7 @@ const createApplication = async (req, res) => {
             });
         }
 
-        // VERIFY THE COURSE EXISTS UNDER THIS TENANT
+        // VERIFIES WETHER THE COURSE EXISTS UNDER THIS TENANT
         const course = await Course.findOne({ _id: courseId, tenantId });
         if (!course) {
             return res.status(404).json({
@@ -62,7 +62,7 @@ const createApplication = async (req, res) => {
             });
         }
 
-        // PREVENT DUPLICATE APPLICATION FOR SAME COURSE BY SAME APPLICANT
+        // PREVENTS DUPLICATE APPLICATION FOR SAME COURSE BY SAME APPLICANT
         const existingApplication = await Application.findOne({
             tenantId,
             courseId,
@@ -98,7 +98,7 @@ const createApplication = async (req, res) => {
     }
 };
 
-// GET ALL APPLICATIONS - INSTITUTION ADMIN (ALL), APPLICANT (OWN ONLY)
+// GETS ALL APPLICATIONS - INSTITUTION ADMIN (ALL), APPLICANT (OWN ONLY)
 const getApplications = async (req, res) => {
     try {
         const tenantId = await resolveTenantFromSubdomain(req);
@@ -109,7 +109,7 @@ const getApplications = async (req, res) => {
             });
         }
 
-        // ADMINS SEE ALL APPLICATIONS; APPLICANTS SEE ONLY THEIR OWN
+        // ADMINS CAN SEE ALL APPLICATIONS; APPLICANTS SEE ONLY THEIR OWN
         const filter = { tenantId };
         if (req.user.role !== 'instAdmin') {
             filter.applicantId = req.user.id;
@@ -132,7 +132,7 @@ const getApplications = async (req, res) => {
     }
 };
 
-// GET SINGLE APPLICATION BY ID - WITHIN TENANT
+// GETS SINGLE APPLICATION BY ID - WITHIN TENANT
 const getApplicationById = async (req, res) => {
     try {
         const tenantId = await resolveTenantFromSubdomain(req);
@@ -171,7 +171,7 @@ const getApplicationById = async (req, res) => {
     }
 };
 
-// UPDATE APPLICATION STATUS - ONLY INSTITUTION ADMIN, WITHIN TENANT
+// UPDATES APPLICATION STATUS - ONLY INSTITUTION ADMIN, WITHIN TENANT
 const updateApplicationStatus = async (req, res) => {
     try {
         const tenantId = req.user.tenantId;
@@ -240,7 +240,7 @@ const updateApplicationStatus = async (req, res) => {
     }
 };
 
-// UPDATE APPLICATION DETAILS - APPLICANT ONLY, ONLY WHILE DRAFT OR PENDING
+// UPDATES APPLICATION DETAILS - APPLICANT ONLY, ONLY WHILE DRAFT OR PENDING
 const updateApplication = async (req, res) => {
     try {
         const tenantId = await resolveTenantFromSubdomain(req);
@@ -263,7 +263,7 @@ const updateApplication = async (req, res) => {
             });
         }
 
-        // LOCK EDITS ONCE THE APPLICATION MOVES PAST PENDING
+        // LOCKS EDITS ONCE THE APPLICATION MOVES PAST PENDING
         if (application.status !== 'pending' && application.status !== 'draft') {
             return res.status(400).json({
                 success: false,
@@ -292,7 +292,7 @@ const updateApplication = async (req, res) => {
     }
 };
 
-// DELETE / WITHDRAW APPLICATION - APPLICANT (OWN, PENDING ONLY) OR ADMIN
+// DELETES / WITHDRAWS APPLICATION - APPLICANT (OWN, PENDING ONLY) OR ADMIN
 const deleteApplication = async (req, res) => {
     try {
         const tenantId = req.user.role === 'instAdmin'
