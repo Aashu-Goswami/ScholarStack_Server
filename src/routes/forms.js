@@ -2,19 +2,22 @@ const express = require('express');
 const router = express.Router();
 const {
   createFormTemplate,
-  getFormTemplate,
+  getFormTemplates,
+  getFormTemplateById,
+  getFormTemplateByCourse,
   updateFormTemplate,
   deleteFormTemplate
 } = require('../../controllers/formBuilderController');
 const { protect } = require('../../middleware/authMiddleware');
-const { adminOnly } = require('../../middleware/roleCheckerMiddleware');
+const { instAdminOnly } = require('../../middleware/roleCheckerMiddleware');
 
-// PROTECTED ROUTE - ANY AUTHENTICATED USER WITHIN TENANT (STUDENT FETCHES FORM CONFIG)
-router.get('/:courseId', protect, getFormTemplate);
+router.get('/course/:courseId', getFormTemplateByCourse);
 
 // PROTECTED ROUTES - ADMIN ONLY
-router.post('/:courseId', protect, adminOnly, createFormTemplate);
-router.put('/:courseId', protect, adminOnly, updateFormTemplate);
-router.delete('/:courseId', protect, adminOnly, deleteFormTemplate);
+router.get('/', protect, instAdminOnly, getFormTemplates);
+router.get('/:id', protect, instAdminOnly, getFormTemplateById);
+router.post('/', protect, instAdminOnly, createFormTemplate);
+router.put('/:id', protect, instAdminOnly, updateFormTemplate);
+router.delete('/:id', protect, instAdminOnly, deleteFormTemplate);
 
 module.exports = router;

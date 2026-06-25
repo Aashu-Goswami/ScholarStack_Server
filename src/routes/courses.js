@@ -8,15 +8,15 @@ const {
   deleteCourse
 } = require('../../controllers/courseController');
 const { protect } = require('../../middleware/authMiddleware');
-const { adminOnly } = require('../../middleware/roleCheckerMiddleware');
+const { instAdminOnly } = require('../../middleware/roleCheckerMiddleware');
 
 // PUBLIC ROUTES
 router.get('/', getCourses);
 router.get('/:id', getCourseById);
 
 // PROTECTED ROUTES - ADMIN ONLY
-router.post('/', protect, adminOnly, createCourse);
-router.put('/:id', protect, adminOnly, updateCourse);
-router.delete('/:id', protect, adminOnly, deleteCourse);
+router.post('/', protect, instAdminOnly, createCourse);
+router.put('/:id', protect, instAdminOnly, updateCourse);
+router.delete('/:id', protect, instAdminOnly, deleteCourse);
 
 module.exports = router;

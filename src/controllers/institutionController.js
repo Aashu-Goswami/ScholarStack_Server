@@ -1,5 +1,4 @@
 const Institution = require('../models/institution');
-const User = require('../models/user');
 
 // GET ALL INSTITUTIONS FUNCTION
 const getInstitutions = async (req, res) => {
@@ -47,7 +46,7 @@ const getInstitutionById = async (req, res) => {
             data : institution
         });
     } catch (err) {
-        res.status(404).json({
+        res.status(500).json({
             success : false,
             message : err.message
         });
