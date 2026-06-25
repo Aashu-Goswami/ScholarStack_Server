@@ -6,27 +6,18 @@
  * and in-app alerts on submissions, verifications, and admission approvals/rejections.
  */
 
-const Application = require('../models/application');
+const Application = require('../models/Application');
 const Course = require('../models/course');
-const Institution = require('../models/institution');
-const User = require('../models/user');
-const { triggerNotification } = require('../services/notificationService');
+const Institution = require('../models/Institution');
 
-/**
- * @function resolveTenantFromSubdomain
- * @description Extracts host from request header, resolves subdomain, 
- * and queries the database for the corresponding Institution tenant ID.
- * Falls back to DEFAULT_TENANT_ID during development.
- * 
- * @param {Object} req - Express request object.
- * @returns {Promise<mongoose.Types.ObjectId|null>} Tenant's ObjectId or null.
- */
+// HELPER FUNCTION - RESOLVE TENANT ID FROM SUBDOMAIN
 const resolveTenantFromSubdomain = async (req) => {
     const host = req.headers.host;
     if (!host) {
         return null;
     }
 
+    // FOR THE DEVELOPMENT PHASE ONLY
     let subdomain = host.split('.')[0];
     if (subdomain === 'localhost' || subdomain === '127.0.0.1' || subdomain === 'www') {
         if (process.env.DEFAULT_TENANT_ID) {
@@ -42,15 +33,7 @@ const resolveTenantFromSubdomain = async (req) => {
     return institution._id;
 };
 
-/**
- * @route POST /api/applications
- * @description Submits a new application for a course under the institution.
- * Validates course existence and prevents duplicate applications for the same course by the same applicant.
- * Triggers an automatic submission email and in-app alert for the applicant (Module 9).
- * 
- * @param {Object} req - Express request object.
- * @param {Object} res - Express response object.
- */
+// CREATE A NEW APPLICATION - APPLICANT (PUBLIC/AUTHENTICATED USER)
 const createApplication = async (req, res) => {
     try {
         const tenantId = await resolveTenantFromSubdomain(req);
@@ -70,7 +53,7 @@ const createApplication = async (req, res) => {
             });
         }
 
-        // Verify that the target course exists and belongs to the resolved tenant
+        // VERIFY THE COURSE EXISTS UNDER THIS TENANT
         const course = await Course.findOne({ _id: courseId, tenantId });
         if (!course) {
             return res.status(404).json({
@@ -79,7 +62,7 @@ const createApplication = async (req, res) => {
             });
         }
 
-        // Prevent duplicates for the same course session by the same applicant
+        // PREVENT DUPLICATE APPLICATION FOR SAME COURSE BY SAME APPLICANT
         const existingApplication = await Application.findOne({
             tenantId,
             courseId,
@@ -92,7 +75,6 @@ const createApplication = async (req, res) => {
             });
         }
 
-        // Create the application document in MongoDB (default status sets to 'submitted')
         const application = await Application.create({
             tenantId,
             courseId,
@@ -100,24 +82,7 @@ const createApplication = async (req, res) => {
             personalDetails: personalDetails || {},
             documents: documents || [],
             session: session || course.session || '',
-            status: 'submitted'
-        });
-
-        /**
-         * ==========================================
-         * APPLICATION SUBMISSION TRIGGER (Module 9)
-         * ==========================================
-         * Fired automatically when a student successfully submits an application.
-         * Creates an in-app alert and sends an confirmation email.
-         */
-        await triggerNotification({
-            recipient: req.user.id,
-            message: `Your application for ${course.name} has been successfully submitted.`,
-            type: 'application_submission',
-            tenantId,
-            email: req.user.email,
-            emailSubject: 'Application Submitted Successfully',
-            emailMessage: `Hi ${req.user.name},\n\nYour application for the course "${course.name}" has been submitted successfully.\n\nStatus: Submitted.`
+            status: 'draft'
         });
 
         res.status(201).json({
@@ -133,15 +98,7 @@ const createApplication = async (req, res) => {
     }
 };
 
-/**
- * @route GET /api/applications
- * @description Retrieves a list of applications.
- * Institution Admins view all applications inside their tenant.
- * Students can only view their own applications.
- * 
- * @param {Object} req - Express request object.
- * @param {Object} res - Express response object.
- */
+// GET ALL APPLICATIONS - INSTITUTION ADMIN (ALL), APPLICANT (OWN ONLY)
 const getApplications = async (req, res) => {
     try {
         const tenantId = await resolveTenantFromSubdomain(req);
@@ -152,9 +109,9 @@ const getApplications = async (req, res) => {
             });
         }
 
+        // ADMINS SEE ALL APPLICATIONS; APPLICANTS SEE ONLY THEIR OWN
         const filter = { tenantId };
-        // If user is not an admin, restrict query to their own applications
-        if (req.user.role !== 'instAdmin' && req.user.role !== 'superAdmin' && req.user.role !== 'admin') {
+        if (req.user.role !== 'instAdmin') {
             filter.applicantId = req.user.id;
         }
 
@@ -175,14 +132,7 @@ const getApplications = async (req, res) => {
     }
 };
 
-/**
- * @route GET /api/applications/:id
- * @description Retrieves a single application detail.
- * Restricts access to owners (students) and tenant admins.
- * 
- * @param {Object} req - Express request object.
- * @param {Object} res - Express response object.
- */
+// GET SINGLE APPLICATION BY ID - WITHIN TENANT
 const getApplicationById = async (req, res) => {
     try {
         const tenantId = await resolveTenantFromSubdomain(req);
@@ -195,7 +145,8 @@ const getApplicationById = async (req, res) => {
 
         const filter = { _id: req.params.id, tenantId };
 
-        if (req.user.role !== 'instAdmin' && req.user.role !== 'superAdmin' && req.user.role !== 'admin') {
+        // NON-ADMINS CAN ONLY VIEW THEIR OWN APPLICATION
+        if (req.user.role !== 'instAdmin') {
             filter.applicantId = req.user.id;
         }
 
@@ -220,15 +171,7 @@ const getApplicationById = async (req, res) => {
     }
 };
 
-/**
- * @route PUT /api/applications/admin/:id
- * @description Admin updates the application workflow status.
- * Enforces strict transitions over: 'submitted', 'under_review', 'verified', 'admitted', 'rejected'.
- * Automatically generates specialized alerts (in-app + email) based on the target status (Module 9).
- * 
- * @param {Object} req - Express request object.
- * @param {Object} res - Express response object.
- */
+// UPDATE APPLICATION STATUS - ONLY INSTITUTION ADMIN, WITHIN TENANT
 const updateApplicationStatus = async (req, res) => {
     try {
         const tenantId = req.user.tenantId;
@@ -241,8 +184,7 @@ const updateApplicationStatus = async (req, res) => {
 
         const { status, remarks } = req.body;
 
-        // Valid Module 7 workflow statuses (excluding 'draft' since drafts cannot be directly set by admins)
-        const VALID_STATUSES = ['submitted', 'under_review', 'verified', 'admitted', 'rejected'];
+        const VALID_STATUSES = ['draft', 'pending', 'under_review', 'verified', 'admitted', 'rejected'];
         if (!status || !VALID_STATUSES.includes(status)) {
             return res.status(400).json({
                 success: false,
@@ -250,10 +192,17 @@ const updateApplicationStatus = async (req, res) => {
             });
         }
 
-        const application = await Application.findOne({ _id: req.params.id, tenantId })
-            .populate('courseId', 'name')
-            .populate('applicantId', 'name email');
+        // WORKFLOW VALIDATION - STATUS CAN ONLY MOVE IN CORRECT ORDER
+        const ALLOWED_TRANSITIONS = {
+            draft: ['pending'],
+            pending: ['under_review', 'rejected'],
+            under_review: ['verified', 'rejected'],
+            verified: ['admitted', 'rejected'],
+            admitted: [],
+            rejected: []
+        };
 
+        const application = await Application.findOne({ _id: req.params.id, tenantId });
         if (!application) {
             return res.status(404).json({
                 success: false,
@@ -261,53 +210,22 @@ const updateApplicationStatus = async (req, res) => {
             });
         }
 
-        const oldStatus = application.status;
+        const currentStatus = application.status;
+        const allowedNext = ALLOWED_TRANSITIONS[currentStatus];
+
+        if (!allowedNext.includes(status)) {
+            return res.status(400).json({
+                success: false,
+                message: `Cannot move from '${currentStatus}' to '${status}'. Allowed: ${allowedNext.join(', ') || 'none'}`
+            });
+        }
+
         application.status = status;
         if (remarks) application.remarks = remarks;
         application.reviewedBy = req.user.id;
         application.reviewedAt = new Date();
 
         await application.save();
-
-        /**
-         * ==========================================
-         * WORKFLOW STATUS TRIGGER (Module 9)
-         * ==========================================
-         * Automatically triggers custom alerts when the application status changes.
-         * Specific templates are fired for:
-         * - 'verified'       -> Verification Completion
-         * - 'admitted'       -> Admission Approval
-         * - 'rejected'       -> Admission Rejection
-         */
-        if (oldStatus !== status) {
-            let notificationType = 'status_update';
-            let emailSubject = `Application Status Updated: ${status.toUpperCase().replace('_', ' ')}`;
-            let emailMessage = `Hi ${application.applicantId.name},\n\nYour application status for "${application.courseId.name}" has been updated to: ${status.toUpperCase().replace('_', ' ')}.\n\nRemarks: ${remarks || 'None'}\n\nBest regards,\nAdmissions Team`;
-
-            if (status === 'verified') {
-                notificationType = 'verification_completion';
-                emailSubject = 'Application Verified Successfully';
-                emailMessage = `Hi ${application.applicantId.name},\n\nYour application and documents for "${application.courseId.name}" have been verified successfully.\n\nStatus: Verified.`;
-            } else if (status === 'admitted') {
-                notificationType = 'admission_approval';
-                emailSubject = 'Congratulations! You are Admitted';
-                emailMessage = `Hi ${application.applicantId.name},\n\nWe are pleased to inform you that your application for "${application.courseId.name}" has been approved, and you have been admitted!\n\nStatus: Admitted.\n\nRemarks: ${remarks || 'None'}`;
-            } else if (status === 'rejected') {
-                notificationType = 'admission_rejection';
-                emailSubject = 'Application Decision Update';
-                emailMessage = `Hi ${application.applicantId.name},\n\nThank you for your interest in "${application.courseId.name}". After careful review, we regret to inform you that we are unable to offer you admission at this time.\n\nRemarks: ${remarks || 'None'}`;
-            }
-
-            await triggerNotification({
-                recipient: application.applicantId._id,
-                message: `Your application status for ${application.courseId.name} has been updated to "${status.replace('_', ' ')}".`,
-                type: notificationType,
-                tenantId,
-                email: application.applicantId.email,
-                emailSubject,
-                emailMessage
-            });
-        }
 
         res.status(200).json({
             success: true,
@@ -322,14 +240,7 @@ const updateApplicationStatus = async (req, res) => {
     }
 };
 
-/**
- * @route PUT /api/applications/:id
- * @description Student edits draft details.
- * Locked once status is no longer 'draft' or 'pending'.
- * 
- * @param {Object} req - Express request object.
- * @param {Object} res - Express response object.
- */
+// UPDATE APPLICATION DETAILS - APPLICANT ONLY, ONLY WHILE DRAFT OR PENDING
 const updateApplication = async (req, res) => {
     try {
         const tenantId = await resolveTenantFromSubdomain(req);
@@ -352,11 +263,11 @@ const updateApplication = async (req, res) => {
             });
         }
 
-        // Lock edits if application is submitted or has moved past draft phase
-        if (application.status !== 'draft' && application.status !== 'pending') {
+        // LOCK EDITS ONCE THE APPLICATION MOVES PAST PENDING
+        if (application.status !== 'pending' && application.status !== 'draft') {
             return res.status(400).json({
                 success: false,
-                message: 'Only pending or draft applications can be edited'
+                message: 'Only draft or pending applications can be edited'
             });
         }
 
@@ -381,16 +292,10 @@ const updateApplication = async (req, res) => {
     }
 };
 
-/**
- * @route DELETE /api/applications/:id
- * @description Applicant withdraws a pending application, or Admin deletes a record.
- * 
- * @param {Object} req - Express request object.
- * @param {Object} res - Express response object.
- */
+// DELETE / WITHDRAW APPLICATION - APPLICANT (OWN, PENDING ONLY) OR ADMIN
 const deleteApplication = async (req, res) => {
     try {
-        const tenantId = req.user.role === 'instAdmin' || req.user.role === 'superAdmin' || req.user.role === 'admin'
+        const tenantId = req.user.role === 'instAdmin'
             ? req.user.tenantId
             : await resolveTenantFromSubdomain(req);
 
@@ -403,10 +308,10 @@ const deleteApplication = async (req, res) => {
 
         const filter = { _id: req.params.id, tenantId };
 
-        // Non-admins can only delete/withdraw their own applications in 'draft' or 'pending' state
-        if (req.user.role !== 'instAdmin' && req.user.role !== 'superAdmin' && req.user.role !== 'admin') {
+        // NON-ADMINS CAN ONLY DELETE THEIR OWN PENDING APPLICATIONS
+        if (req.user.role !== 'instAdmin') {
             filter.applicantId = req.user.id;
-            filter.status = { $in: ['draft', 'pending'] };
+            filter.status = 'pending';
         }
 
         const application = await Application.findOneAndDelete(filter);
