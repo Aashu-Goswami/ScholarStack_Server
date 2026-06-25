@@ -1,8 +1,8 @@
 /**
  * @file controllers/applicationController.js
- * @description Controller handling student admission application CRUD operations (Module 5)
- * and managing the validation state machine transitions (Module 7).
- * Connects directly to the notification engine (Module 9) to generate automatic emails
+ * @description Controller handling student admission application CRUD operations
+ * and managing the validation state machine transitions .
+ * Connects directly to the notification engine to generate automatic emails
  * and in-app alerts on submissions, verifications, and admission approvals/rejections.
  */
 
