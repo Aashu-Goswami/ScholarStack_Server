@@ -2,8 +2,8 @@
 /**
  * Dynamically classifies a student application based on:
  * - Academic Marks
- * - Course Eligibility Criteria (minMarks, meritThreshold)
- * - Category (Reserved Quotas)
+ * - Course Eligibility Criteria
+ * - Category
  * - Application/Documents Status
  */
 const classifyApplication = (application) => {
