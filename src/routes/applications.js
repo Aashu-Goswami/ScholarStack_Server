@@ -6,19 +6,23 @@ const {
   getMyApplication,
   getAllApplications,
   updateApplicationStatus,
-  filterApplications
+  filterApplications,
+  getApplicationById,
+  deleteApplication
 } = require('../../controllers/applicationController');
 const { protect } = require('../../middleware/authMiddleware');
-const { adminOnly, studentOnly } = require('../../middleware/roleCheckerMiddleware');
+const { instAdminOnly, studentOnly } = require('../../middleware/roleCheckerMiddleware');
 
 // PUBLIC ROUTES
 router.post('/', protect, studentOnly, submitApplication);
 router.put('/:id/draft', protect, studentOnly, saveDraft);
 router.get('/my', protect, studentOnly, getMyApplication);
+router.get('/:id', protect, getApplicationById);
 
 // ADMIN ROUTES
-router.get('/admin/all', protect, adminOnly, getAllApplications);
-router.put('/admin/:id', protect, adminOnly, updateApplicationStatus);
-router.get('/admin/filter', protect, adminOnly, filterApplications);
+router.get('/admin/all', protect, instAdminOnly, getAllApplications);
+router.put('/admin/:id', protect, instAdminOnly, updateApplicationStatus);
+router.get('/admin/filter', protect, instAdminOnly, filterApplications);
+router.delete('/:id', protect, instAdminOnly, deleteApplication);
 
 module.exports = router;

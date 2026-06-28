@@ -29,16 +29,27 @@ const applicationSchema = new mongoose.Schema(
         ],
         session: {
             type: String,
-            default: ''
+            default: '',
+            trim : true
         },
         status: {
             type: String,
-            enum: ['draft', 'pending', 'under_review', 'verified', 'admitted', 'rejected'],
-            default: 'draft'
+            enum: ['draft', 'submitted', 'under_review', 'verified', 'admitted', 'rejected'],
+            default: 'draft',
+            required : true
+        },
+        classification : {
+            type : mongoose.Schema.Types.Mixed,
+            default : {}
+        },
+        submittedAt : {
+            type : Date,
+            default : null
         },
         remarks: {
             type: String,
-            default: ''
+            default: '',
+            trim : true
         },
         reviewedBy: {
             type: mongoose.Schema.Types.ObjectId,
@@ -55,7 +66,24 @@ const applicationSchema = new mongoose.Schema(
     }
 );
 
-// One student can apply once per course per tenant
-applicationSchema.index({ tenantId: 1, courseId: 1, applicantId: 1 }, { unique: true });
+applicationSchema.index({ tenantId : 1, createdAt : -1 });
+applicationSchema.index({ tenantId : 1, status : 1 });
+applicationSchema.index({ tenantId : 1, courseId : 1 });
+applicationSchema.index({ tenantId : 1, applicationId : 1 });
+
+applicationSchema.index({ applicantId: 1, tenantId: 1, createdAt: -1 });
+applicationSchema.index({ tenantId: 1, courseId: 1, applicantId: 1 }, { unique: false });
+applicationSchema.index({ createdAt: 1 });
+
+applicationSchema.pre('save', function(next) {
+  if (this.isModified('status') && this.status === 'submitted' && !this.submittedAt) {
+    this.submittedAt = new Date();
+  }
+  
+  if (this.isModified('status') && this.status === 'draft') {
+    this.submittedAt = null;
+  }
+  next();
+});
 
 module.exports = mongoose.model('Application', applicationSchema);

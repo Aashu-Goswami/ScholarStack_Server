@@ -6,9 +6,11 @@
  * and in-app alerts on submissions, verifications, and admission approvals/rejections.
  */
 
-const Application = require('../models/Application');
+const Application = require('../models/application');
 const Course = require('../models/course');
-const Institution = require('../models/Institution');
+const Institution = require('../models/institution');
+const FormTemplate = require('../models/formTemplate');
+const User = require('../models/user');
 
 // HELPER FUNCTION - RESOLVE TENANT ID FROM SUBDOMAIN
 const resolveTenantFromSubdomain = async (req) => {
@@ -33,14 +35,25 @@ const resolveTenantFromSubdomain = async (req) => {
     return institution._id;
 };
 
+const STATUS_TRANSITIONS = {
+    draft: ['submitted'],
+    submitted: ['under_review', 'rejected'],
+    under_review: ['verified', 'rejected'],
+    verified: ['admitted', 'rejected'],
+    admitted: [],
+    rejected: []
+};
+
+const VALID_STATUSES = ['draft', 'submitted', 'under_review', 'verified', 'admitted', 'rejected'];
+
 // CREATES A NEW APPLICATION - APPLICANT (PUBLIC/AUTHENTICATED USER)
-const createApplication = async (req, res) => {
+const submitApplication = async (req, res) => {
     try {
         const tenantId = await resolveTenantFromSubdomain(req);
         if (!tenantId) {
             return res.status(400).json({
-                success: false,
-                message: 'Invalid institution subdomain'
+                success : false,
+                message : 'Invalid institution subdomain'
             });
         }
 
@@ -48,8 +61,8 @@ const createApplication = async (req, res) => {
 
         if (!courseId) {
             return res.status(400).json({
-                success: false,
-                message: 'Please provide a course ID'
+                success : false,
+                message : 'Please provide a course ID'
             });
         }
 
@@ -57,8 +70,8 @@ const createApplication = async (req, res) => {
         const course = await Course.findOne({ _id: courseId, tenantId });
         if (!course) {
             return res.status(404).json({
-                success: false,
-                message: 'Course not found for this institution'
+                success : false,
+                message : 'Course not found for this institution'
             });
         }
 
@@ -66,56 +79,151 @@ const createApplication = async (req, res) => {
         const existingApplication = await Application.findOne({
             tenantId,
             courseId,
-            applicantId: req.user.id
+            applicantId : req.user.id,
+            status : { $in: ['submitted', 'under_review', 'verified', 'admitted'] }
         });
         if (existingApplication) {
             return res.status(400).json({
-                success: false,
-                message: 'You have already applied for this course'
+                success : false,
+                message : 'You have already applied for this course'
             });
+        }
+
+        const template = await FormTemplate.findOne({ courseId, tenantId }).sort({ createdAt : -1 });
+        if(template) {
+            for(let field of template.fields) {
+                if(field.validation && field.validation.required) {
+                    const value = personalDetails ? personalDetails[field.fieldId] : undefined;
+                    if(value === undefined || value === null || value === '') {
+                        return res.status(400).json({
+                            success : false,
+                            message : `Field ${field.label} is required`
+                        });
+                    }
+                }
+            }
         }
 
         const application = await Application.create({
             tenantId,
             courseId,
-            applicantId: req.user.id,
-            personalDetails: personalDetails || {},
-            documents: documents || [],
-            session: session || course.session || '',
-            status: 'draft'
+            applicantId : req.user.id,
+            personalDetails : personalDetails || {},
+            documents : documents || [],
+            session : session || course.session || '',
+            status : 'submitted',
+            submittedAt : new Date()
         });
 
         res.status(201).json({
-            success: true,
-            message: 'Application submitted successfully',
-            data: application
+            success : true,
+            message : 'Application submitted successfully',
+            data : application
         });
     } catch (err) {
         res.status(500).json({
-            success: false,
-            message: err.message
+            success : false,
+            message : err.message
+        });
+    }
+};
+
+// SAVE DRAFT FUNCTION - FOR STUDENTS
+const saveDraft = async (req, res) => {
+    try {
+        const tenantId = await resolveTenantFromSubdomain(req);
+        if(!tenantId) {
+            return res.status(400).json({
+                success : false,
+                message : 'Invalid Institution subdomain'
+            });
+        }
+
+        const { id } = req.params;
+        const { personalDetails, documents, session } = req.body;
+
+        const application = await Application.findOne({
+            _id : id,
+            tenantId,
+            applicantId : req.user.id
+        });
+        if(!application) {
+            return res.status(404).json({
+                success : false,
+                message : 'Application not found'
+            });
+        }
+
+        if(application.status !== 'draft') {
+            return res.status(400).json({
+                success : false,
+                message : 'Only draft applications can be edited'
+            });
+        }
+
+        if(personalDetails) application.personalDetails = personalDetails;
+        if(documents) application.documents = documents;
+        if(session) application.session = session;
+
+        await application.save();
+
+        res.status(200).json({
+            success : true,
+            message : 'Draft saved successfully',
+            data : application
+        });
+    } catch (err) {
+        res.status(500).json({
+            success : false,
+            message : err.message
+        });
+    }
+};
+
+// GET MY APPLICATION - ESPECIALLY FOR STUDENTS 
+const getMyApplication = async (req, res) => {
+    try {
+        const user = req.user;
+        if(user.role !== 'student') {
+            return res.status(403).json({
+                success : false,
+                message : 'Access denied'
+            });
+        }
+
+        const applications = await Application.find({
+            applicationId : user.id,
+            tenantId : user.tenantId
+        })
+            .populate('courseId', 'name session')
+            .sort({ createdAt : -1 });
+
+        res.status(200).json({
+            success : true,
+            count : applications.length,
+            data : applications
+        });
+    } catch (err) {
+        res.status(500).json({
+            success : false,
+            message : err.message
         });
     }
 };
 
 // GETS ALL APPLICATIONS - INSTITUTION ADMIN (ALL), APPLICANT (OWN ONLY)
-const getApplications = async (req, res) => {
+const getAllApplications = async (req, res) => {
     try {
-        const tenantId = await resolveTenantFromSubdomain(req);
+        const tenantId = req.await.tenantId;
         if (!tenantId) {
-            return res.status(400).json({
+            return res.status(403).json({
                 success: false,
-                message: 'Invalid institution subdomain'
+                message: 'Admin does not belong to any institution'
             });
         }
 
-        // ADMINS CAN SEE ALL APPLICATIONS; APPLICANTS SEE ONLY THEIR OWN
-        const filter = { tenantId };
-        if (req.user.role !== 'instAdmin') {
-            filter.applicantId = req.user.id;
-        }
-
-        const applications = await Application.find(filter)
+        const applications = await Application.find({ tenantId })
+            .populate('applicationId', 'name email')
             .populate('courseId', 'name session')
             .sort({ createdAt: -1 });
 
@@ -146,12 +254,14 @@ const getApplicationById = async (req, res) => {
         const filter = { _id: req.params.id, tenantId };
 
         // NON-ADMINS CAN ONLY VIEW THEIR OWN APPLICATION
-        if (req.user.role !== 'instAdmin') {
+        if (req.user.role !== 'instAdmin' && req.user.role !== 'superAdmin') {
             filter.applicantId = req.user.id;
         }
 
         const application = await Application.findOne(filter)
+            .populate('applicationId', 'name email')
             .populate('courseId', 'name session eligibilityCriteria');
+
         if (!application) {
             return res.status(404).json({
                 success: false,
@@ -182,36 +292,26 @@ const updateApplicationStatus = async (req, res) => {
             });
         }
 
+        const { id } = req.params;
         const { status, remarks } = req.body;
 
-        const VALID_STATUSES = ['draft', 'pending', 'under_review', 'verified', 'admitted', 'rejected'];
         if (!status || !VALID_STATUSES.includes(status)) {
             return res.status(400).json({
-                success: false,
-                message: `Status must be one of: ${VALID_STATUSES.join(', ')}`
+                success : false,
+                message : `Status must be one of: ${VALID_STATUSES.join(', ')}`
             });
         }
 
-        // WORKFLOW VALIDATION - STATUS CAN ONLY MOVE IN CORRECT ORDER
-        const ALLOWED_TRANSITIONS = {
-            draft: ['pending'],
-            pending: ['under_review', 'rejected'],
-            under_review: ['verified', 'rejected'],
-            verified: ['admitted', 'rejected'],
-            admitted: [],
-            rejected: []
-        };
-
-        const application = await Application.findOne({ _id: req.params.id, tenantId });
+        const application = await Application.findOne({ _id : id, tenantId });
         if (!application) {
             return res.status(404).json({
-                success: false,
-                message: 'Application not found'
+                success : false,
+                message : 'Application not found'
             });
         }
 
         const currentStatus = application.status;
-        const allowedNext = ALLOWED_TRANSITIONS[currentStatus];
+        const allowedNext = STATUS_TRANSITIONS[currentStatus] || [];
 
         if (!allowedNext.includes(status)) {
             return res.status(400).json({
@@ -240,21 +340,61 @@ const updateApplicationStatus = async (req, res) => {
     }
 };
 
-// UPDATES APPLICATION DETAILS - APPLICANT ONLY, ONLY WHILE DRAFT OR PENDING
-const updateApplication = async (req, res) => {
+// FILTER APPLICATIONS FUNCTION - FOR ADMIN DASHBOARD
+const filterApplications = async (req, res) => {
     try {
-        const tenantId = await resolveTenantFromSubdomain(req);
-        if (!tenantId) {
-            return res.status(400).json({
-                success: false,
-                message: 'Invalid institution subdomain'
+        const tenantId = req.user.tenantId;
+        if(!tenantId) {
+            return res.status(403).json({
+                success : false,
+                message : 'Admin does not belong to any institution'
             });
         }
 
-        const application = await Application.findOne({
-            _id: req.params.id,
-            tenantId,
-            applicantId: req.user.id
+        const { status, courseId, applicationId, dateFrom, dateTo } = req.query;
+        const filter = tenantId;
+
+        if(status) filter.status = status;
+        if(courseId) filter.courseId = courseId;
+        if(applicationId) filter.applicationId = applicationId;
+        if(dateFrom) filter.createdAt = { $gte : new Date(dateFrom) };
+        if(dateTo) {
+            if(!filter.createdAt) filter.createdAt = {};
+            filter.createdAt.$lte = new Date(dateTo);
+        }
+
+        const applications = await Application.find(filter)
+            .populate('applicationId', 'name email')
+            .populate('courseId', 'name session')
+            .sort({ createdAt : -1 });
+
+        res.status(200).json({
+            success : true,
+            count : applications.length,
+            data : applications
+        });
+    } catch (err) {
+        res.status(500).json({
+            success : false,
+            message : err.message
+        })
+    }
+};
+
+// DELETE APPLICATION - ADMIN ONLY
+const deleteApplication = async (req, res) => {
+    try {
+        const tenantId = req.user.tenantId;
+        if (!tenantId) {
+            return res.status(403).json({
+                success: false,
+                message: 'Admin does not belong to any institution'
+            });
+        }
+
+        const application = await Application.findOneAndDelete({
+            _id : req.params.id,
+            tenantId
         });
         if (!application) {
             return res.status(404).json({
@@ -263,68 +403,9 @@ const updateApplication = async (req, res) => {
             });
         }
 
-        // LOCKS EDITS ONCE THE APPLICATION MOVES PAST PENDING
-        if (application.status !== 'pending' && application.status !== 'draft') {
-            return res.status(400).json({
-                success: false,
-                message: 'Only draft or pending applications can be edited'
-            });
-        }
-
-        const { personalDetails, documents, session } = req.body;
-
-        if (personalDetails) application.personalDetails = personalDetails;
-        if (documents) application.documents = documents;
-        if (session) application.session = session;
-
-        await application.save();
-
         res.status(200).json({
             success: true,
-            message: 'Application updated successfully',
-            data: application
-        });
-    } catch (err) {
-        res.status(500).json({
-            success: false,
-            message: err.message
-        });
-    }
-};
-
-// DELETES / WITHDRAWS APPLICATION - APPLICANT (OWN, PENDING ONLY) OR ADMIN
-const deleteApplication = async (req, res) => {
-    try {
-        const tenantId = req.user.role === 'instAdmin'
-            ? req.user.tenantId
-            : await resolveTenantFromSubdomain(req);
-
-        if (!tenantId) {
-            return res.status(403).json({
-                success: false,
-                message: 'Unable to resolve institution'
-            });
-        }
-
-        const filter = { _id: req.params.id, tenantId };
-
-        // NON-ADMINS CAN ONLY DELETE THEIR OWN PENDING APPLICATIONS
-        if (req.user.role !== 'instAdmin') {
-            filter.applicantId = req.user.id;
-            filter.status = 'pending';
-        }
-
-        const application = await Application.findOneAndDelete(filter);
-        if (!application) {
-            return res.status(404).json({
-                success: false,
-                message: 'Application not found or cannot be withdrawn at this stage'
-            });
-        }
-
-        res.status(200).json({
-            success: true,
-            message: 'Application withdrawn successfully'
+            message: 'Application deleted successfully'
         });
     } catch (err) {
         res.status(500).json({
@@ -335,11 +416,13 @@ const deleteApplication = async (req, res) => {
 };
 
 module.exports = {
-    createApplication,
-    getApplications,
+    submitApplication,
+    saveDraft,
+    getMyApplication,
+    getAllApplications,
     getApplicationById,
     updateApplicationStatus,
-    updateApplication,
+    filterApplications,
     deleteApplication
 };
 
