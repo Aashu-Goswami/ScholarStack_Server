@@ -15,11 +15,25 @@ const triggerNotification = async ({
     emailMessage
 }) => {
     try {
+        // Map types to allowed schema enums
+        const allowedTypes = ['registration', 'application', 'document', 'status_update', 'admission'];
+        let mappedType = 'status_update';
+        if (allowedTypes.includes(type)) {
+            mappedType = type;
+        } else if (type === 'application_submission') {
+            mappedType = 'application';
+        } else if (type === 'verification_completion') {
+            mappedType = 'document';
+        } else if (type === 'admission_approval' || type === 'admission_rejection') {
+            mappedType = 'admission';
+        }
+
         // 1. Create In-App Notification record
         await Notification.create({
-            recipient,
+            userId: recipient,
+            title: emailSubject || 'ScholarStack Update',
             message,
-            type: type || 'system_alert',
+            type: mappedType,
             tenantId
         });
 

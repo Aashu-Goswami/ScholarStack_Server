@@ -146,7 +146,7 @@ const login = async (req, res) => {
         if(tenantId) {
             user = await User.findOne({ email, tenantId });
         } else {
-            user = await user.findOne({ email, role : 'superAdmin' })
+            user = await User.findOne({ email, role : 'superAdmin' })
         }
 
         if(!user) {
