@@ -2,40 +2,58 @@ const mongoose = require('mongoose');
 
 const auditLogSchema = new mongoose.Schema(
     {
-        tenantId: {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: 'Institution',
-            default: null
+        tenantId : {
+            type : mongoose.Schema.Types.ObjectId,
+            ref : 'Institution',
+            required : [true, 'Tenant ID is required'],
+            index : true
         },
-        performedBy: {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: 'User',
-            required: true
+        applicationId : {
+            type : mongoose.Schema.Types.ObjectId,
+            ref : 'Application',
+            required : [true, 'Application ID is required'],
+            index : true
         },
-        action: {
-            type: String,
-            required: [true, 'Please specify action'],
-            trim: true
+        fromStatus : {
+            type : String,
+            enum : ['draft', 'submitted', 'under_review', 'verified', 'admitted', 'rejected'],
+            required : [true, 'From status is required']
         },
-        targetModel: {
-            type: String,
-            trim: true,
-            default: ''
+        toStatus : {
+            type : String,
+            enum : ['draft', 'submitted', 'under_review', 'verified', 'admitted', 'rejected'],
+            required : [true, 'To status is required']
         },
-        targetId: {
-            type: mongoose.Schema.Types.ObjectId,
-            default: null
+        changedBy : {
+            type : mongoose.Schema.Types.ObjectId,
+            ref : 'User',
+            required : [true, 'Changed by user ID is required']
         },
-        details: {
-            type: mongoose.Schema.Types.Mixed,
-            default: {}
+        changedAt : {
+            type : Date,
+            default : Date.now
+        }, 
+        remarks : {
+            type : String,
+            default : '',
+            trim : true,
+            maxLength : [500, 'Remarks cannot exceed 500 characters']
         }
     },
     {
-        timestamps: true
+        timestamps : true
     }
 );
 
-auditLogSchema.index({ tenantId: 1, createdAt: -1 });
+auditLogSchema.index({ tenantId: 1, changedAt: -1 });
+auditLogSchema.index({ applicationId : 1, changedAt : -1 });
+auditLogSchema.index({ tenantId : 1, toStatus : 1, changedAt : -1 });
+
+auditLogSchema.pre('save', function(next) {
+  if (this.fromStatus === this.toStatus) {
+    return next(new Error('From status and to status cannot be the same'));
+  }
+  next();
+});
 
 module.exports = mongoose.model('AuditLog', auditLogSchema);

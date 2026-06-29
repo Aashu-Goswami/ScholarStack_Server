@@ -8,10 +8,15 @@ const {
   updateApplicationStatus,
   filterApplications,
   getApplicationById,
-  deleteApplication
+  deleteApplication,
+  getApplicationTimeline,
+  getWorkflowStatuses
 } = require('../../controllers/applicationController');
 const { protect } = require('../../middleware/authMiddleware');
 const { instAdminOnly, studentOnly } = require('../../middleware/roleCheckerMiddleware');
+
+router.get('./workflow/statuses', protect, getWorkflowStatuses);
+router.get('./:id/timeline', protect, getApplicationTimeline);
 
 // PUBLIC ROUTES
 router.post('/', protect, studentOnly, submitApplication);

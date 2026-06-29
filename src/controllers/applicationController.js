@@ -11,6 +11,7 @@ const Course = require('../models/course');
 const Institution = require('../models/institution');
 const FormTemplate = require('../models/formTemplate');
 const User = require('../models/user');
+const AuditLog = require('../models/auditLog');
 
 
 // HELPER FUNCTION - RESOLVE TENANT ID FROM SUBDOMAIN
@@ -46,6 +47,99 @@ const STATUS_TRANSITIONS = {
 };
 
 const VALID_STATUSES = ['draft', 'submitted', 'under_review', 'verified', 'admitted', 'rejected'];
+
+const getApplicationTimeline = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const user = req.user;
+
+        const filter = { _id : id };
+
+        if(user.role === 'student') {
+            filter.applicantId = user.id;
+        }
+
+        if(user.role === 'instAdmin' || user.role === 'superAdmin') {
+            if(user.role === 'instAdmin') {
+                filter.tenantId = user.tenantId;
+            }
+        }
+
+        const application = await Application.findOne(filter);
+        if(!application) {
+            return res.status(404).json({
+                success : false,
+                message : 'Application not found or access denied'
+            });
+        }
+
+        const timeline = await AuditLog.find({
+            applicationId : id,
+            tenantId : application.tenantId
+        })
+            .populate('changedBy', 'name eamil role')
+            .sort({ changedAt : 1 });
+
+        res.status(200).josn({
+            success : true,
+            count : timeline.length,
+            data : timeline
+        });
+    } catch (err) {
+        res.status(500).json({
+            success : false,
+            message : err.message
+        });
+    }
+};
+
+const getWorkFlowStatuses = async (req, res) => {
+    try {
+        const statusLabels = {
+            draft: 'Draft',
+            submitted: 'Submitted',
+            under_review: 'Under Review',
+            verified: 'Verified',
+            admitted: 'Admitted',
+            rejected: 'Rejected'
+        };
+
+        const transitions = {};
+        for(const [from, toList] of Object.entries(STATUS_TRANSITIONS)) {
+            transitions[from] = toList.map(to => ({
+                from,
+                to,
+                label : `${statusLabels[from]} → ${statusLabels[to]}`
+            }));
+        }
+
+        res.status(200).json({
+            success : true,
+            data : {
+                statuses : VALID_STATUSES.map(status => ({
+                    value : status,
+                    label : statusLabels[status],
+                    isTerminal : STATUS_TRANSITIONS[status]?.length === 0 || false
+                })),
+                transitions,
+                flow : [
+                    { from: 'draft', to: 'submitted' },
+                    { from: 'submitted', to: 'under_review' },
+                    { from: 'submitted', to: 'rejected' },
+                    { from: 'under_review', to: 'verified' },
+                    { from: 'under_review', to: 'rejected' },
+                    { from: 'verified', to: 'admitted' },
+                    { from: 'verified', to: 'rejected' }
+                ]
+            }
+        });
+    } catch (err) {
+        res.status(500).json({
+            success : false,
+            message : err.message
+        });
+    }
+};
 
 // CREATES A NEW APPLICATION - APPLICANT (PUBLIC/AUTHENTICATED USER)
 const submitApplication = async (req, res) => {
@@ -114,6 +208,15 @@ const submitApplication = async (req, res) => {
             session : session || course.session || '',
             status : 'submitted',
             submittedAt : new Date()
+        });
+
+        await AuditLog.create({
+            tenantId,
+            applicationId: application._id,
+            fromStatus: 'draft',
+            toStatus: 'submitted',
+            changedBy: req.user.id,
+            remarks: 'Application submitted by student'
         });
 
         res.status(201).json({
@@ -193,7 +296,7 @@ const getMyApplication = async (req, res) => {
         }
 
         const applications = await Application.find({
-            applicationId : user.id,
+            applicantId : user.id,
             tenantId : user.tenantId
         })
             .populate('courseId', 'name session')
@@ -215,7 +318,7 @@ const getMyApplication = async (req, res) => {
 // GETS ALL APPLICATIONS - INSTITUTION ADMIN (ALL), APPLICANT (OWN ONLY)
 const getAllApplications = async (req, res) => {
     try {
-        const tenantId = req.await.tenantId;
+        const tenantId = req.user.tenantId;
         if (!tenantId) {
             return res.status(403).json({
                 success: false,
@@ -224,7 +327,7 @@ const getAllApplications = async (req, res) => {
         }
 
         const applications = await Application.find({ tenantId })
-            .populate('applicationId', 'name email')
+            .populate('applicantId', 'name email')
             .populate('courseId', 'name session')
             .sort({ createdAt: -1 });
 
@@ -260,7 +363,7 @@ const getApplicationById = async (req, res) => {
         }
 
         const application = await Application.findOne(filter)
-            .populate('applicationId', 'name email')
+            .populate('applicantId', 'name email')
             .populate('courseId', 'name session eligibilityCriteria');
 
         if (!application) {
@@ -328,6 +431,15 @@ const updateApplicationStatus = async (req, res) => {
 
         await application.save();
 
+        await AuditLog.create({
+            tenantId,
+            applicationId: application._id,
+            fromStatus: currentStatus,
+            toStatus: status,
+            changedBy: req.user.id,
+            remarks: remarks || `Status changed from ${currentStatus} to ${status}`
+        });
+
         res.status(200).json({
             success: true,
             message: 'Application status updated successfully',
@@ -353,11 +465,11 @@ const filterApplications = async (req, res) => {
         }
 
         const { status, courseId, applicationId, dateFrom, dateTo } = req.query;
-        const filter = tenantId;
+        const filter = { tenantId };
 
         if(status) filter.status = status;
         if(courseId) filter.courseId = courseId;
-        if(applicationId) filter.applicationId = applicationId;
+        if(applicantId) filter.applicantId = applicantId;
         if(dateFrom) filter.createdAt = { $gte : new Date(dateFrom) };
         if(dateTo) {
             if(!filter.createdAt) filter.createdAt = {};
@@ -365,7 +477,7 @@ const filterApplications = async (req, res) => {
         }
 
         const applications = await Application.find(filter)
-            .populate('applicationId', 'name email')
+            .populate('applicantId', 'name email')
             .populate('courseId', 'name session')
             .sort({ createdAt : -1 });
 
@@ -404,6 +516,11 @@ const deleteApplication = async (req, res) => {
             });
         }
 
+        await AuditLog.deleteMany({
+            applicationId: application._id,
+            tenantId
+        });
+
         res.status(200).json({
             success: true,
             message: 'Application deleted successfully'
@@ -424,6 +541,8 @@ module.exports = {
     getApplicationById,
     updateApplicationStatus,
     filterApplications,
-    deleteApplication
+    deleteApplication,
+    getApplicationTimeline,
+    getWorkFlowStatuses
 };
 
