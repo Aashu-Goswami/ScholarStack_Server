@@ -10,7 +10,7 @@ const Application = require('../models/application');
 const Institution = require('../models/institution');
 const User = require('../models/user');
 const { triggerNotification } = require('../services/notificationService');
-const upload = require('../middleware/fileUploadMiddleware').single('file');
+// const upload = require('../middleware/fileUploadMiddleware').single('file');
 
 /**
  * @function resolveTenantFromSubdomain
@@ -54,91 +54,80 @@ const resolveTenantFromSubdomain = async (req) => {
  * @returns {Promise<void>} Sends JSON response back to client.
  */
 const uploadDocument = async (req, res) => {
-    // Execute Multer upload single middleware programmatically inside the controller
-    upload(req, res, async function (err) {
-        if (err) {
+    try {
+        if (!req.file) {
             return res.status(400).json({ 
                 success: false, 
-                message: err.message 
+                message: 'Please upload a file' 
             });
         }
 
-        try {
-            // Verify if a file was successfully uploaded by multer
-            if (!req.file) {
-                return res.status(400).json({ 
-                    success: false, 
-                    message: 'Please upload a file' 
-                });
-            }
-
-            const { name, type, applicationId } = req.body;
-            if (!name || !type || !applicationId) {
-                return res.status(400).json({ 
-                    success: false, 
-                    message: 'Please provide document name, type, and application ID' 
-                });
-            }
-
-            // Resolve the tenant context
-            const tenantId = req.user.tenantId || await resolveTenantFromSubdomain(req);
-            if (!tenantId) {
-                return res.status(400).json({ 
-                    success: false, 
-                    message: 'Unable to resolve institution' 
-                });
-            }
-
-            // Verify that the target application exists and belongs to the authenticated applicant
-            const application = await Application.findOne({
-                _id: applicationId,
-                tenantId,
-                applicantId: req.user.id
-            });
-
-            if (!application) {
-                return res.status(404).json({ 
-                    success: false, 
-                    message: 'Associated application not found or access denied' 
-                });
-            }
-
-            // Lock edits if the application status has progressed past the draft/pending review phase
-            if (application.status !== 'pending' && application.status !== 'draft') {
-                return res.status(400).json({ 
-                    success: false, 
-                    message: 'Documents can only be modified while application is pending or draft' 
-                });
-            }
-
-            // Save document metadata and upload URL path in database
-            const document = await Document.create({
-                name,
-                type,
-                fileUrl: `/uploads/documents/${req.file.filename}`,
-                status: 'pending',
-                studentId: req.user.id,
-                applicationId,
-                tenantId
-            });
-
-            // Append document ID reference to the Application model document registry
-            application.documents = application.documents || [];
-            application.documents.push(document._id);
-            await application.save();
-
-            res.status(201).json({ 
-                success: true, 
-                message: 'Document uploaded successfully', 
-                data: document 
-            });
-        } catch (err) {
-            res.status(500).json({ 
+        const { name, type, applicationId } = req.body;
+        if (!name || !type || !applicationId) {
+            return res.status(400).json({ 
                 success: false, 
-                message: err.message 
+                message: 'Please provide document name, type, and application ID' 
             });
         }
-    });
+
+        // Resolve the tenant context
+        const tenantId = req.user.tenantId || await resolveTenantFromSubdomain(req);
+        if (!tenantId) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Unable to resolve institution' 
+            });
+        }
+
+        // Verify that the target application exists and belongs to the authenticated applicant
+        const application = await Application.findOne({
+            _id: applicationId,
+            tenantId,
+            applicantId: req.user.id
+        });
+
+        if (!application) {
+            return res.status(404).json({ 
+                success: false, 
+                message: 'Associated application not found or access denied' 
+            });
+        }
+
+        // Lock edits if the application status has progressed past the draft/pending review phase
+        if (application.status !== 'pending' && application.status !== 'draft') {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Documents can only be modified while application is pending or draft' 
+            });
+        }
+
+        // Save document metadata and upload URL path in database
+        const document = await Document.create({
+            name,
+            type,
+            fileUrl: `/uploads/documents/${req.file.filename}`,
+            status: 'pending',
+            studentId: req.user.id,
+            applicationId,
+            tenantId
+        });
+
+        // Append document ID reference to the Application model document registry
+        application.documents = application.documents || [];
+        application.documents.push(document._id);
+        await application.save();
+
+        res.status(201).json({ 
+            success: true, 
+            message: 'Document uploaded successfully', 
+            data: document 
+        });
+    } catch (err) {
+        res.status(500).json({ 
+            success: false, 
+            message: err.message 
+        });
+    }
 };
 
 /**
@@ -186,6 +175,46 @@ const getDocuments = async (req, res) => {
     }
 };
 
+// GET SINGLE DOCUMENT BY ID FUNCTION - FOR BOTH STUDENT AND INSTITUTION ADMIN
+const getDocumentById = async (req, res) => {
+    try {
+        const tenantId = req.user.tenantId || await resolveTenantFromSubdomain(req);
+        if(!tenantId) {
+            return res.status(400).json({
+                success : false,
+                message : 'Unable to resolve institution'
+            });
+        }
+
+        const { id } = req.params;
+        const filter = { _id : id, tenantId };
+
+        if(req.user.role === 'student') {
+            filter.studentId = req.user.id;
+        }
+
+        const document = await Document.findOne(filter)
+            .populate('reviewedBy', 'name email');
+
+        if(!document) {
+            return res.status(404).json({
+                success : false,
+                message : 'Document not found'
+            });
+        }
+
+        res.status(200).json({
+            success : true,
+            data : document
+        });
+    } catch (err) {
+        res.status(500).json({
+            success : false,
+            message : err.message
+        });
+    }
+};
+
 /**
  * @route PUT /api/documents/:id/status
  * @description Admin approves or rejects a specific document and attaches comments.
@@ -201,8 +230,8 @@ const updateDocumentStatus = async (req, res) => {
         const tenantId = req.user.tenantId;
         if (!tenantId) {
             return res.status(403).json({ 
-                success: false, 
-                message: 'Admin not belonging to institution' 
+                success : false, 
+                message : 'Admin does not belong to any institution' 
             });
         }
 
@@ -210,17 +239,17 @@ const updateDocumentStatus = async (req, res) => {
         const VALID_STATUSES = ['approved', 'rejected', 'pending'];
         if (!status || !VALID_STATUSES.includes(status)) {
             return res.status(400).json({ 
-                success: false, 
-                message: 'Invalid status' 
+                success : false, 
+                message : 'Invalid status' 
             });
         }
 
         // Retrieve document belonging strictly to the admin's tenant
-        const document = await Document.findOne({ _id: req.params.id, tenantId });
+        const document = await Document.findOne({ _id : req.params.id, tenantId });
         if (!document) {
             return res.status(404).json({ 
-                success: false, 
-                message: 'Document not found' 
+                success : false, 
+                message : 'Document not found' 
             });
         }
 
@@ -268,8 +297,50 @@ const updateDocumentStatus = async (req, res) => {
     }
 };
 
+// DELETE A DOCUMENT FUNCTION - ONLY FOR INSTITUTION ADMIN
+const deleteDocument = async (req, res) => {
+    try {
+        const tenantId = req.user.tenantId;
+        if(!tenantId) {
+            return res.status(403).json({
+                success : false,
+                message : 'Admin does not belong to any institution'
+            });
+        }
+
+        const document = await Document.findOneAndDelete({
+            _id: req.params.id,
+            tenantId
+        });
+        if(!document) {
+            return res.status(404).json({
+                success : false,
+                message : 'Document not found'
+            });
+        }
+
+        if(document.applicationId) {
+            await Application.findByIdAndUpdate(document.applicationId, {
+                $pull : { documents : document.id }
+            });
+        }
+
+        res.status(200).json({
+            success : false,
+            message : 'Document deleted successfully'
+        });
+    } catch (err) {
+        res.status(500).json({
+            success : false,
+            message : err.message
+        });
+    }
+};
+
 module.exports = {
     uploadDocument,
     getDocuments,
-    updateDocumentStatus
+    getDocumentById,
+    updateDocumentStatus,
+    deleteDocument
 };
