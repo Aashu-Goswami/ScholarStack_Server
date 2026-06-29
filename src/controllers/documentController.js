@@ -1,8 +1,7 @@
 /**
  * @file controllers/documentController.js
  * @description Controller handling document operations for the ScholarStack portal (Module 6).
- * Enforces student uploads (with multer validation inside the controller), role-based retrieval,
- * and admin verification status updates (approving/rejecting documents with remarks and automated alerts).
+ * Enforces student uploads, role-based retrieval, and admin verification status updates.
  */
 
 const Document = require('../models/document');
@@ -10,7 +9,6 @@ const Application = require('../models/application');
 const Institution = require('../models/institution');
 const User = require('../models/user');
 const { triggerNotification } = require('../services/notificationService');
-// const upload = require('../middleware/fileUploadMiddleware').single('file');
 
 /**
  * @function resolveTenantFromSubdomain
@@ -44,14 +42,9 @@ const resolveTenantFromSubdomain = async (req) => {
 
 /**
  * @route POST /api/documents/upload
- * @description Student uploads a single file (Marksheet, Certificate, Identity Proof, Passport Photo).
- * Runs the multer upload middleware internally to validate file dimensions/types and limit sizes (up to 10MB).
+ * @description Student uploads a single file. File upload validation (Multer) runs as route middleware.
  * Connects the document record to the correct tenant and appends its reference to the applicant's course application.
  * Only allowed if the application status is in 'pending' or 'draft' state.
- * 
- * @param {Object} req - Express request object containing file and multipart/form-data.
- * @param {Object} res - Express response object.
- * @returns {Promise<void>} Sends JSON response back to client.
  */
 const uploadDocument = async (req, res) => {
     try {
@@ -94,7 +87,7 @@ const uploadDocument = async (req, res) => {
         }
 
         // Lock edits if the application status has progressed past the draft/pending review phase
-        if (application.status !== 'pending' && application.status !== 'draft') {
+        if (application.status !== 'submitted' && application.status !== 'draft') {
             return res.status(400).json({ 
                 success: false, 
                 message: 'Documents can only be modified while application is pending or draft' 
@@ -134,11 +127,7 @@ const uploadDocument = async (req, res) => {
  * @route GET /api/documents/:applicationId
  * @description Retrieves all uploaded documents associated with a specific application.
  * Students can only fetch documents belonging to their own applications.
- * Institution Admins can fetch any documents belonging to applications within their tenant.
- * 
- * @param {Object} req - Express request object.
- * @param {Object} res - Express response object.
- * @returns {Promise<void>} Sends JSON response listing documents.
+ * Institution/Super Admins can fetch any documents belonging to applications within their tenant.
  */
 const getDocuments = async (req, res) => {
     try {
@@ -179,38 +168,38 @@ const getDocuments = async (req, res) => {
 const getDocumentById = async (req, res) => {
     try {
         const tenantId = req.user.tenantId || await resolveTenantFromSubdomain(req);
-        if(!tenantId) {
+        if (!tenantId) {
             return res.status(400).json({
-                success : false,
-                message : 'Unable to resolve institution'
+                success: false,
+                message: 'Unable to resolve institution'
             });
         }
 
         const { id } = req.params;
         const filter = { _id : id, tenantId };
 
-        if(req.user.role === 'student') {
+        if (req.user.role === 'student') {
             filter.studentId = req.user.id;
         }
 
         const document = await Document.findOne(filter)
             .populate('reviewedBy', 'name email');
 
-        if(!document) {
+        if (!document) {
             return res.status(404).json({
-                success : false,
-                message : 'Document not found'
+                success: false,
+                message: 'Document not found'
             });
         }
 
         res.status(200).json({
-            success : true,
-            data : document
+            success: true,
+            data: document
         });
     } catch (err) {
         res.status(500).json({
-            success : false,
-            message : err.message
+            success: false,
+            message: err.message
         });
     }
 };
@@ -219,19 +208,14 @@ const getDocumentById = async (req, res) => {
  * @route PUT /api/documents/:id/status
  * @description Admin approves or rejects a specific document and attaches comments.
  * Automatically triggers the Document Rejection alert (in-app + email) if state shifts to 'rejected'.
- * Locks review logs with admin auditor ID and timestamp.
- * 
- * @param {Object} req - Express request object containing body: { status, remarks }.
- * @param {Object} res - Express response object.
- * @returns {Promise<void>} Sends JSON response indicating verification results.
  */
 const updateDocumentStatus = async (req, res) => {
     try {
         const tenantId = req.user.tenantId;
         if (!tenantId) {
             return res.status(403).json({ 
-                success : false, 
-                message : 'Admin does not belong to any institution' 
+                success: false, 
+                message: 'Admin does not belong to any institution' 
             });
         }
 
@@ -239,17 +223,17 @@ const updateDocumentStatus = async (req, res) => {
         const VALID_STATUSES = ['approved', 'rejected', 'pending'];
         if (!status || !VALID_STATUSES.includes(status)) {
             return res.status(400).json({ 
-                success : false, 
-                message : 'Invalid status' 
+                success: false, 
+                message: 'Invalid status' 
             });
         }
 
         // Retrieve document belonging strictly to the admin's tenant
-        const document = await Document.findOne({ _id : req.params.id, tenantId });
+        const document = await Document.findOne({ _id: req.params.id, tenantId });
         if (!document) {
             return res.status(404).json({ 
-                success : false, 
-                message : 'Document not found' 
+                success: false, 
+                message: 'Document not found' 
             });
         }
 
@@ -261,14 +245,7 @@ const updateDocumentStatus = async (req, res) => {
 
         await document.save();
 
-        /**
-         * ==========================================
-         * DOCUMENT REJECTION TRIGGER (Module 9)
-         * ==========================================
-         * If the verification state updates to "rejected", fetch the target student's 
-         * profile and call the triggerNotification service helper to automatically log 
-         * an in-app alert in MongoDB and send an email notification to the student.
-         */
+        // DOCUMENT REJECTION TRIGGER
         if (oldStatus !== status && status === 'rejected') {
             const studentUser = await User.findById(document.studentId);
             if (studentUser) {
@@ -301,10 +278,10 @@ const updateDocumentStatus = async (req, res) => {
 const deleteDocument = async (req, res) => {
     try {
         const tenantId = req.user.tenantId;
-        if(!tenantId) {
+        if (!tenantId) {
             return res.status(403).json({
-                success : false,
-                message : 'Admin does not belong to any institution'
+                success: false,
+                message: 'Admin does not belong to any institution'
             });
         }
 
@@ -312,27 +289,27 @@ const deleteDocument = async (req, res) => {
             _id: req.params.id,
             tenantId
         });
-        if(!document) {
+        if (!document) {
             return res.status(404).json({
-                success : false,
-                message : 'Document not found'
+                success: false,
+                message: 'Document not found'
             });
         }
 
-        if(document.applicationId) {
+        if (document.applicationId) {
             await Application.findByIdAndUpdate(document.applicationId, {
-                $pull : { documents : document.id }
+                $pull: { documents: document._id }
             });
         }
 
         res.status(200).json({
-            success : false,
-            message : 'Document deleted successfully'
+            success: true,
+            message: 'Document deleted successfully'
         });
     } catch (err) {
         res.status(500).json({
-            success : false,
-            message : err.message
+            success: false,
+            message: err.message
         });
     }
 };
