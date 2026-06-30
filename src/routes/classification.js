@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const {
-    classifyApplication,
+    classifySingleApplication,
     classifyAllApplications,
     getClassifications,
     getClassificationStats,
@@ -24,7 +24,7 @@ router.get('/stats', protect, instAdminOnly, getClassificationStats);
 router.get('/filter', protect, instAdminOnly, filterByClassification);
 
 // SINGLE APPLICATION CLASSIFICATION
-router.post('/:applicationId/classify', protect, instAdminOnly, classifyApplication);
+router.post('/:applicationId/classify', protect, instAdminOnly, classifySingleApplication);
 
 // GET ALL CLASSIFICATIONS
 router.get('/', protect, instAdminOnly, getClassifications);

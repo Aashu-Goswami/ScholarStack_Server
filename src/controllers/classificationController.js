@@ -1,5 +1,5 @@
 const Application = require('../models/application');
-const ClassificationRule = require('../models/classificationRule.js');
+const ClassificationRule = require('../models/classificationRule');
 const { classifyApplication } = require('../services/classificationEngine');
 
 // GET CLASSIFICATION RULES FOR THE INSTITUTION
@@ -83,7 +83,7 @@ const updateClassificationRules = async (req, res) => {
 };
 
 // RUN CLASSIFICATION FOR A SINGLE APPLICATION
-const classifyApplication = async (req, res) => {
+const classifySingleApplication = async (req, res) => {
     try {
         const tenantId = req.user.tenantId;
         if(!tenantId) {
@@ -169,7 +169,7 @@ const classifyAllApplications = async (req, res) => {
         }
 
         res.status(200).json({
-            success : false,
+            success : true,
             message : `Successfully classified ${applications.length} applications`,
             count : applications.length
         });
@@ -204,7 +204,7 @@ const getClassifications = async (req, res) => {
         const skip = (parseInt(page) - 1) * parseInt(limit);
 
         const applications = await Application.find(filter)
-            .populate('applicationId', 'name email')
+            .populate('applicantId', 'name email')
             .populate('courseId', 'name session')
             .sort({ createdAt : -1 })
             .skip(skip)
@@ -273,7 +273,7 @@ const getClassificationStats = async (req, res) => {
             { $group : { _id : { course : '$courseId', merit : '$classification.meritLevel' }, count : { $sum : 1 } } }
         ]);
 
-        res.staus(200).json({
+        res.status(200).json({
             success : true,
             data : {
                 overall : stats[0] || {
@@ -327,7 +327,7 @@ const filterByClassification = async (req, res) => {
         if(eligible !== undefined) filter['classification.eligible'] = eligible === 'true';
         if(meritLevel) filter['classification.meritLevel'] = meritLevel;
         if(category) filter['classification.category'] = category;
-        if(isReserved !== undefined) filter['classification.isReserved'] = isReserved === 'true0;'
+        if(isReserved !== undefined) filter['classification.isReserved'] = isReserved === 'true;'
         if(status) filter.status = status;
         if(courseId) filter.courseId = courseId;
         if(dateFrom) filter.createdAt = { $gte : new Date(dateFrom) };
@@ -409,7 +409,7 @@ const getApplicationByClassification = async(req, res) => {
 module.exports = {
     getClassificationRules,
     updateClassificationRules,
-    classifyApplication,
+    classifySingleApplication,
     classifyAllApplications,
     getClassifications,
     getClassificationStats,
