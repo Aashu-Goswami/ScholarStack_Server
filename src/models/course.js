@@ -53,11 +53,4 @@ const courseSchema=new mongoose.Schema(
 courseSchema.index({ name : 1, tenantId : 1 },{ unique : true });
 courseSchema.index({ tenantId : 1, createdAt : -1 });
 
-courseSchema.pre('save', function(next) {
-    if(this.name) {
-        this.name = this.name.trim();
-    }
-    next();
-});
-
-module.exports=mongoose.model('course',courseSchema);
+module.exports=mongoose.model('Course',courseSchema);

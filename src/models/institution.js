@@ -56,6 +56,6 @@ const institutionSchema = new mongoose.Schema(
     }
 );
 
-instiutionSchema.index({ name: 1, subdomain: 1 }, { unique: true });
+institutionSchema.index({ name: 1, subdomain: 1 }, { unique: true });
 
 module.exports = mongoose.model('Institution', institutionSchema);

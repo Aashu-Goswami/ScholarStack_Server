@@ -75,15 +75,4 @@ applicationSchema.index({ applicantId: 1, tenantId: 1, createdAt: -1 });
 applicationSchema.index({ tenantId: 1, courseId: 1, applicantId: 1 }, { unique: false });
 applicationSchema.index({ createdAt: 1 });
 
-applicationSchema.pre('save', function(next) {
-  if (this.isModified('status') && this.status === 'submitted' && !this.submittedAt) {
-    this.submittedAt = new Date();
-  }
-  
-  if (this.isModified('status') && this.status === 'draft') {
-    this.submittedAt = null;
-  }
-  next();
-});
-
 module.exports = mongoose.model('Application', applicationSchema);
