@@ -47,7 +47,7 @@ const classifyApplication = (application, rules = {}, allApplications = []) => {
 
     let meritLevel = 'Low Merit';
     if(studentMarks >= courseHighMeritThreshold) {
-        meritLevel = 'High Merit';
+        meritLevel ='High Merit';
     } else if(studentMarks >= courseMediumMeritThreshold) {
         meritLevel = 'Medium Merit';
     }
