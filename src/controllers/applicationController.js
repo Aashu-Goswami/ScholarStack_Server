@@ -77,10 +77,10 @@ const getApplicationTimeline = async (req, res) => {
             applicationId : id,
             tenantId : application.tenantId
         })
-            .populate('changedBy', 'name eamil role')
+            .populate('changedBy', 'name email role')
             .sort({ changedAt : 1 });
 
-        res.status(200).josn({
+        res.status(200).json({
             success : true,
             count : timeline.length,
             data : timeline
@@ -187,8 +187,8 @@ const submitApplication = async (req, res) => {
         const template = await FormTemplate.findOne({ courseId, tenantId }).sort({ createdAt : -1 });
         if(template) {
             for(let field of template.fields) {
-                if(field.validation && field.validation.required) {
-                    const value = personalDetails ? personalDetails[field.fieldId] : undefined;
+                if(field.required) {
+                    const value = personalDetails ? personalDetails[field.fieldKey] : undefined;
                     if(value === undefined || value === null || value === '') {
                         return res.status(400).json({
                             success : false,
@@ -464,7 +464,7 @@ const filterApplications = async (req, res) => {
             });
         }
 
-        const { status, courseId, applicationId, dateFrom, dateTo } = req.query;
+        const { status, courseId, applicantId, dateFrom, dateTo } = req.query;
         const filter = { tenantId };
 
         if(status) filter.status = status;
