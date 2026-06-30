@@ -4,18 +4,32 @@ const Notification = require('../models/notification');
 const getMyNotifications = async (req, res) => {
     try {
         const tenantId = req.user.tenantId;
-        const filter = { userId: req.user.id };
+        const userId = req.user.id;
+
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const skip = (page - 1) * limit;
+
+        const filter = { userId };
 
         if (tenantId) {
             filter.tenantId = tenantId;
         }
 
-        const notifications = await Notification.find(filter)
-            .sort({ createdAt: -1 });
+        const [notifications, total] = await Promise.all([
+            Notification.find(filter)
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(limit),
+            Notification.countDocuments(filter)
+        ]);
 
         res.status(200).json({
             success: true,
             count: notifications.length,
+            total,
+            page,
+            pages : Math.ceil(total / limit),
             data: notifications
         });
     } catch (err) {
@@ -26,12 +40,37 @@ const getMyNotifications = async (req, res) => {
     }
 };
 
+// GET COUNT OF UNREAD NOTIFICATIONS FOR LOOGED-IN USER
+const getUnreadCount = async (req, res) => {
+    try {
+        const tenantId = req.user.tenantId;
+        const userId = req.user.id;
+
+        const filter = { userId, isRead : false };
+        if(tenantId) {
+            filter.tenantId = tenantId;
+        }
+
+        const count = await Notification.countDocuments(filter);
+
+        res.status(200).json({
+            success : true,
+            count
+        });
+    } catch (err) {
+        res.status(500).json({
+            success : false,
+            message : err.message
+        });
+    }
+};
+
 // MARK NOTIFICATION AS READ
 const markAsRead = async (req, res) => {
     try {
         const notification = await Notification.findOneAndUpdate(
             { _id: req.params.id, userId: req.user.id },
-            { isRead: true },
+            { isRead: true, readAt: new Date() },
             { new: true }
         );
 
@@ -55,7 +94,66 @@ const markAsRead = async (req, res) => {
     }
 };
 
+// MARK ALL NOTIFICATIONS AS READ FOR LOOGED-IN USER
+const markAllAsRead = async (req, res) => {
+    try {
+        const tenantId = req.user.tenantId;
+        const userId = req.user.id;
+
+        const filter = { userId, isRead : false};
+        if(tenantId) {
+            filter.tenantId = tenantId;
+        }
+
+        const result = await Notification.updateMany(
+            filter,
+            { isRead : true, readAt : new Date() }
+        );
+
+        res.status(200).json({
+            success : true,
+            message : `Marked ${result.modifiedCount} notifications as read`,
+            count : result.modifiedCount
+        });
+    } catch (err) {
+        res.status(500).json({
+            success : false,
+            message : err.message
+        });
+    }
+};
+
+// DELETE A NOTIFICATION
+const deleteNotification = async (req, res) => {
+    try {
+        const notification = await Notification.findOneAndDelete({
+            _id : req.params.id,
+            userId : req.user.id
+        });
+
+        if(!notification) {
+            return res.status(404).json({
+                success : false,
+                message : 'Notification not found'
+            });
+        }
+
+        res.status(200).json({
+            success : true,
+            message : 'Notification deleted successfully'
+        });
+    } catch (err) {
+        res.status(500).json({
+            success : false,
+            message : err.message
+        });
+    }
+};
+
 module.exports = {
     getMyNotifications,
-    markAsRead
+    getUnreadCount,
+    markAsRead,
+    markAllAsRead,
+    deleteNotification
 };
