@@ -8,7 +8,7 @@ const Document = require('../models/document');
 const Application = require('../models/application');
 const Institution = require('../models/institution');
 const User = require('../models/user');
-const { triggerNotification } = require('../services/notificationService');
+const { triggerNotification } = require('../services/notificationServices');
 
 /**
  * @function resolveTenantFromSubdomain
