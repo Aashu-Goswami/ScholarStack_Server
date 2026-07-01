@@ -10,7 +10,7 @@ const {
   getApplicationById,
   deleteApplication,
   getApplicationTimeline,
-  getWorkflowStatuses
+  getWorkFlowStatuses
 } = require('../../controllers/applicationController');
 const { protect } = require('../../middleware/authMiddleware');
 const { instAdminOnly, studentOnly } = require('../../middleware/roleCheckerMiddleware');
