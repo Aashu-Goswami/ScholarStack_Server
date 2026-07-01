@@ -132,7 +132,7 @@ const login = async (req, res) => {
             // IF TENANT RESOLUTION FAILS, IT MIGHT BE SUPER ADMIN
             const host = req.headers.host;
             const hostname = host.split(':')[0];
-            const subdomain = host.split('.')[0];
+            const subdomain = hostname.split('.')[0];
 
             if(subdomain !== 'super') {
                 return res.status(400).json({
