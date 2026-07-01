@@ -254,7 +254,7 @@ const getClassificationStats = async (req, res) => {
                     totalApplications : { $sum : 1 },
                     eligible : { $sum : { $cond : [{ $eq : ['$classification.eligible', true] }, 1, 0] } },
                     notEligible : { $sum : { $cond : [{ $eq : ['$classification.eligible', false] }, 1, 0] } },
-                    highMerit : { $sum : { $cond : [{ $eq : ['$classification.meritLevel', 'Hight Merit'] }, 1, 0] } },
+                    highMerit : { $sum : { $cond : [{ $eq : ['$classification.meritLevel', 'High Merit'] }, 1, 0] } },
                     mediumMerit : { $sum : { $cond : [{ $eq : ['$classification.meritLevel', 'Medium Merit'] }, 1, 0] } },
                     lowMerit : { $sum : { $cond : [{ $eq : ['$classification.meritLevel', 'Low Merit'] }, 1, 0] } },
                     reserved : { $sum : { $cond : [{ $eq : ['$classification.isReserved', true] }, 1, 0] } },
