@@ -1,8 +1,6 @@
 const express = require('express');
 const dotenv = require('dotenv');
 const connectDB = require('./src/config/db');
-<<<<<<< HEAD
-=======
 
 // IMPORT ROUTERS
 const authRoutes = require('./src/routes/auth');
@@ -15,7 +13,6 @@ const formRoutes = require('./src/routes/forms');
 const dashboardRoutes = require('./src/routes/dashboard');
 const classificationRoutes = require('./src/routes/classification');
 
->>>>>>> fdcbf1f35a0b364613173366e7f356c14779576e
 
 // LOAD ENV VARIABLES
 dotenv.config();
