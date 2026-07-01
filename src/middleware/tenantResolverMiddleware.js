@@ -7,7 +7,10 @@ const tenantResolver = async (req, res, next) => {
             return res.status(400).json({ success: false, message: 'Host header missing' });
         }
 
-        let subdomain = host.split('.')[0];
+        // Clean host to ignore port
+        const hostname = host.split(':')[0];
+        const subdomain = hostname.split('.')[0];
+
         if (subdomain === 'localhost' || subdomain === '127.0.0.1' || subdomain === 'www') {
             req.tenantId = process.env.DEFAULT_TENANT_ID || null;
             return next();
