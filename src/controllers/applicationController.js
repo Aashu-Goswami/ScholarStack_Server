@@ -23,7 +23,7 @@ const resolveTenantFromSubdomain = async (req) => {
 
     // FOR THE DEVELOPMENT PHASE ONLY
     const hostname = host.split(':')[0];
-    let subdomain = host.split('.')[0];
+    let subdomain = hostname.split('.')[0];
     if (subdomain === 'localhost' || subdomain === '127.0.0.1' || subdomain === 'www') {
         if (process.env.DEFAULT_TENANT_ID) {
             return process.env.DEFAULT_TENANT_ID;
