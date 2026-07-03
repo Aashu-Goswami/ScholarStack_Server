@@ -327,7 +327,7 @@ const filterByClassification = async (req, res) => {
         if(eligible !== undefined) filter['classification.eligible'] = eligible === 'true';
         if(meritLevel) filter['classification.meritLevel'] = meritLevel;
         if(category) filter['classification.category'] = category;
-        if(isReserved !== undefined) filter['classification.isReserved'] = isReserved === 'true;'
+        if(isReserved !== undefined) filter['classification.isReserved'] = isReserved === 'true';
         if(status) filter.status = status;
         if(courseId) filter.courseId = courseId;
         if(dateFrom) filter.createdAt = { $gte : new Date(dateFrom) };
