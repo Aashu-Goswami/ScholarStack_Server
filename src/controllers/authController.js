@@ -93,6 +93,17 @@ const registerStudent = async (req, res) => {
             isEmailVerified : true
         });
 
+        // Trigger Registration Success Notification (In-app and Email)
+        await triggerNotification({
+            recipient: user._id,
+            message: 'Your registration with ScholarStack was successful!',
+            type: 'registration',
+            tenantId,
+            email: user.email,
+            emailSubject: 'Welcome to ScholarStack - Registration Successful',
+            emailMessage: `Hi ${user.name},\n\nYour account has been registered successfully on our admissions portal.\n\nYou can now log in, configure your profile, and start your course applications.\n\nBest regards,\nAdmissions Team`
+        });
+
         const token = generateToken(user._id, user.role, user.tenantId);
         
         res.status(201).json({
@@ -208,7 +219,7 @@ const forgotPassword = async (req, res) => {
             return res.status(500).json({ 
                 success : false, 
                 message : err.message 
-            });
+                });
         }
 
         // FIND USER WITH THE TENANT ID AND SPECIFIC EMAIL
