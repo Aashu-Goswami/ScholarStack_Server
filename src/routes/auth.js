@@ -7,11 +7,12 @@ const {
     resetPassword,
     verifyEmail,
     changePassword,
-    registerInstitutionAdmin
+    registerInstitutionAdmin,
+    addInstitutionAdmin
 } = require('../controllers/authController');
 
 const { protect } = require('../middleware/authMiddleware');
-const { superAdminOnly } = require('../middleware/roleCheckerMiddleware');
+const { superAdminOnly, instAdminOnly } = require('../middleware/roleCheckerMiddleware');
 
 // PUBLIC ROUTES
 router.post('/register/student', registerStudent);
@@ -25,5 +26,8 @@ router.post('/change-password', protect, changePassword);
 
 // CREATE FIRST INSTITUTION ADMIN - ONLY FOR SUPER ADMIN
 router.post('/register/admin', protect, superAdminOnly, registerInstitutionAdmin);
+
+// CREATE ADDITIONAL INSTITUTION ADMIN - ONLY INSTITUTION ADMIN
+router.post('/add-admin', protect, instAdminOnly, addInstitutionAdmin);
 
 module.exports = router;
