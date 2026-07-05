@@ -18,6 +18,17 @@ exports.instAdminOnly = (req, res, next) => {
   next();
 };
 
+// Combined middleware allowing both instAdmin and superAdmin
+exports.adminOnly = (req, res, next) => {
+  if (req.user.role !== 'instAdmin' && req.user.role !== 'superAdmin') {
+    return res.status(403).json({ 
+        success : false,
+        message : 'Access denied. Admins only.' 
+    });
+  }
+  next();
+};
+
 exports.studentOnly = (req, res, next) => {
   if (req.user.role !== 'student') {
     return res.status(403).json({

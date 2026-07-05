@@ -15,7 +15,8 @@ const {
 const { protect } = require('../middleware/authMiddleware');
 const { instAdminOnly, studentOnly } = require('../middleware/roleCheckerMiddleware');
 
-router.get('./workflow/statuses', protect, getWorkflowStatuses);
+
+router.get('./workflow/statuses', protect, getWorkFlowStatuses);
 router.get('./:id/timeline', protect, getApplicationTimeline);
 
 // PUBLIC ROUTES

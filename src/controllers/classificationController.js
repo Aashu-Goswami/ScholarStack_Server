@@ -254,7 +254,7 @@ const getClassificationStats = async (req, res) => {
                     totalApplications : { $sum : 1 },
                     eligible : { $sum : { $cond : [{ $eq : ['$classification.eligible', true] }, 1, 0] } },
                     notEligible : { $sum : { $cond : [{ $eq : ['$classification.eligible', false] }, 1, 0] } },
-                    highMerit : { $sum : { $cond : [{ $eq : ['$classification.meritLevel', 'Hight Merit'] }, 1, 0] } },
+                    highMerit : { $sum : { $cond : [{ $eq : ['$classification.meritLevel', 'High Merit'] }, 1, 0] } },
                     mediumMerit : { $sum : { $cond : [{ $eq : ['$classification.meritLevel', 'Medium Merit'] }, 1, 0] } },
                     lowMerit : { $sum : { $cond : [{ $eq : ['$classification.meritLevel', 'Low Merit'] }, 1, 0] } },
                     reserved : { $sum : { $cond : [{ $eq : ['$classification.isReserved', true] }, 1, 0] } },
@@ -327,7 +327,7 @@ const filterByClassification = async (req, res) => {
         if(eligible !== undefined) filter['classification.eligible'] = eligible === 'true';
         if(meritLevel) filter['classification.meritLevel'] = meritLevel;
         if(category) filter['classification.category'] = category;
-        if(isReserved !== undefined) filter['classification.isReserved'] = isReserved === 'true;'
+        if(isReserved !== undefined) filter['classification.isReserved'] = isReserved === 'true';
         if(status) filter.status = status;
         if(courseId) filter.courseId = courseId;
         if(dateFrom) filter.createdAt = { $gte : new Date(dateFrom) };
