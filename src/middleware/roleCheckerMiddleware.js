@@ -27,3 +27,24 @@ exports.studentOnly = (req, res, next) => {
   }
   next();
 };
+
+exports.superAdminOrOwnInstitution = (req, res, next) => {
+  // Super admin can access any institution
+  if (req.user.role === 'superAdmin') {
+    return next();
+  }
+
+  // Institution admin can access only their own institution
+  if (
+    req.user.role === 'instAdmin' &&
+    req.user.tenantId &&
+    req.user.tenantId.toString() === req.params.id
+  ) {
+    return next();
+  }
+
+  return res.status(403).json({
+    success: false,
+    message: 'Access denied'
+  });
+};

@@ -6,9 +6,9 @@ const {
   createInstitution,
   updateInstitution,
   deleteInstitution
-} = require('../../controllers/institutionController');
-const { protect } = require('../../middleware/authMiddleware');
-const { superAdminOnly, instAdminOnly } = require('../../middleware/roleCheckerMiddleware');
+} = require('../controllers/institutionController');
+const { protect } = require('../middleware/authMiddleware');
+const { superAdminOnly, instAdminOnly, superAdminOrOwnInstitution } = require('../middleware/roleCheckerMiddleware');
 
 // PROTECTED ROUTES - SUPER ADMIN ONLY
 router.get('/', protect, superAdminOnly, getInstitutions);
@@ -16,7 +16,7 @@ router.post('/', protect, superAdminOnly, createInstitution);
 router.delete('/:id', protect, superAdminOnly, deleteInstitution);
 
 // PROTECTED ROUTES - FOR BOTH SUPER ADMIN AND INSTITUTION ADMINS
-router.get('/:id', protect, {superAdminOnly, instAdminOnly}, getInstitutionById);
-router.put('/:id', protect, {superAdminOnly, instAdminOnly}, updateInstitution);
+router.get('/:id', protect, superAdminOrOwnInstitution, getInstitutionById);
+router.put('/:id', protect, superAdminOrOwnInstitution, updateInstitution);
 
 module.exports = router;

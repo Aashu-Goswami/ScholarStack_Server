@@ -11,13 +11,13 @@ const generateToken = (userId, role, tenantId) => {
     return jwt.sign(
         { id : userId, role, tenantId },
         process.env.JWT_SECRET,
-        { expiresIn : process.env.JWT_EXPRIES_IN || '30d' }
+        { expiresIn : process.env.JWT_EXPIRES_IN || '30d' }
     );
 };
 
 // HELPER FUNCTION TO RESOLVE TENANT FROM SUBDOMAIN
 const resolveTenant = async (req) => {
-    const host = req.headers.host;
+    const host = req.headers.host.split(':')[0]; 
 
     // GET SUBDOMAIN FROM THE HOST
     let subdomain = host.split('.')[0];
@@ -152,7 +152,7 @@ const login = async (req, res) => {
         if(!user) {
             return res.status(401).json({
                 success : false,
-                message : 'Invaid Credentials'
+                message : 'Invalid Credentials'
             });
         }
 

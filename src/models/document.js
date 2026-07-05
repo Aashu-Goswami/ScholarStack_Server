@@ -71,19 +71,4 @@ documentSchema.index({ tenantId: 1, status: 1 });
 documentSchema.index({ applicationId: 1, tenantId: 1 });
 documentSchema.index({ studentId: 1, tenantId: 1 });
 
-documentSchema.pre('save', function(next) {
-  if (this.isModified('status') && (this.status === 'approved' || this.status === 'rejected')) {
-    if (!this.reviewedAt) {
-      this.reviewedAt = new Date();
-    }
-  }
-
-  if (this.isModified('status') && this.status === 'pending') {
-    this.reviewedBy = null;
-    this.reviewedAt = null;
-    this.remarks = '';
-  }
-  next();
-});
-
 module.exports = mongoose.model('Document', documentSchema);

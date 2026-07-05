@@ -7,9 +7,9 @@ const {
   getFormTemplateByCourse,
   updateFormTemplate,
   deleteFormTemplate
-} = require('../../controllers/formBuilderController');
-const { protect } = require('../../middleware/authMiddleware');
-const { instAdminOnly } = require('../../middleware/roleCheckerMiddleware');
+} = require('../controllers/formBuilderController');
+const { protect } = require('../middleware/authMiddleware');
+const { instAdminOnly } = require('../middleware/roleCheckerMiddleware');
 
 router.get('/course/:courseId', getFormTemplateByCourse);
 

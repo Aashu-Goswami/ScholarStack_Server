@@ -6,9 +6,9 @@ const {
   getCourseById,
   updateCourse,
   deleteCourse
-} = require('../../controllers/courseController');
-const { protect } = require('../../middleware/authMiddleware');
-const { instAdminOnly } = require('../../middleware/roleCheckerMiddleware');
+} = require('../controllers/courseController');
+const { protect } = require('../middleware/authMiddleware');
+const { instAdminOnly } = require('../middleware/roleCheckerMiddleware');
 
 // PUBLIC ROUTES
 router.get('/', getCourses);

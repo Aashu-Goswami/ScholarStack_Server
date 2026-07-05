@@ -7,9 +7,9 @@ const {
   getDocumentById,
   updateDocumentStatus,
   deleteDocument
-} = require('../../controllers/documentController');
-const { protect } = require('../../middleware/authMiddleware');
-const { instAdminOnly, studentOnly } = require('../../middleware/roleCheckerMiddleware');
+} = require('../controllers/documentController');
+const { protect } = require('../middleware/authMiddleware');
+const { instAdminOnly, studentOnly } = require('../middleware/roleCheckerMiddleware');
 
 // PUBLIC ROUTE
 router.post('/upload', protect, studentOnly, upload.single('file'), uploadDocument);

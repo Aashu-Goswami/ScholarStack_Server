@@ -11,9 +11,9 @@ const {
   deleteApplication,
   getApplicationTimeline,
   getWorkflowStatuses
-} = require('../../controllers/applicationController');
-const { protect } = require('../../middleware/authMiddleware');
-const { instAdminOnly, studentOnly } = require('../../middleware/roleCheckerMiddleware');
+} = require('../controllers/applicationController');
+const { protect } = require('../middleware/authMiddleware');
+const { instAdminOnly, studentOnly } = require('../middleware/roleCheckerMiddleware');
 
 router.get('./workflow/statuses', protect, getWorkflowStatuses);
 router.get('./:id/timeline', protect, getApplicationTimeline);

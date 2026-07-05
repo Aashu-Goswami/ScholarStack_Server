@@ -8,10 +8,10 @@ const {
     verifyEmail,
     changePassword,
     registerInstitutionAdmin
-} = require('../../controllers/authController');
+} = require('../controllers/authController');
 
-const { protect } = require('../../middleware/authMiddleware');
-const { superAdminOnly } = require('../../middleware/roleCheckerMiddleware');
+const { protect } = require('../middleware/authMiddleware');
+const { superAdminOnly } = require('../middleware/roleCheckerMiddleware');
 
 // PUBLIC ROUTES
 router.post('/register/student', registerStudent);
