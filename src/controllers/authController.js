@@ -13,6 +13,7 @@ const generateToken = (userId, role, tenantId) => {
         { id : userId, role, tenantId },
         process.env.JWT_SECRET,
         { expiresIn : process.env.JWT_EXPIRES_IN || '30d' }
+
     );
 };
 
@@ -23,6 +24,7 @@ const resolveTenant = async (req) => {
     // GET SUBDOMAIN FROM THE HOST
     const hostname = host.split(':')[0];
     const subdomain = hostname.split('.')[0];
+
     if(subdomain === 'localhost' || subdomain === 'scholarstack' || subdomain === 'www' || subdomain === '127.0.0.1' || subdomain === 'super') {
         // DEFAULT TENANT ID FOR DEVELOPMENT
         if(process.env.DEFAULT_TENANT_ID) {
@@ -387,6 +389,7 @@ const changePassword = async (req, res) => {
         res.status(200).json({
             success : true,
             message : 'Password Changed Successfully'
+
         });
     } catch (err) {
         res.status(500).json({
