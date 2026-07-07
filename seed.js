@@ -81,6 +81,8 @@ const seedData = async () => {
         });
 
         console.log('Users created');
+        console.log("Student1 ID:", student1._id);
+        console.log("Student2 ID:", student2._id);
 
         // 3. CREATE COURSES
         const course1 = await Course.create({
@@ -106,6 +108,9 @@ const seedData = async () => {
         });
 
         console.log('Courses created');
+        console.log("course1 ID:", course1._id);
+        console.log("course2 ID:", course2._id);
+
 
         // 4. CREATE FORM TEMPLATE FOR COURSE 1
         const formTemplate1 = await FormTemplate.create({
@@ -138,10 +143,12 @@ const seedData = async () => {
             applicantId: student2._id,
             personalDetails: { fullName: 'Rahul Verma', twelfthPercentage: 78, category: 'OBC' },
             session: '2026-27',
-            status: 'under_review'
+            status: 'draft'
         });
 
         console.log('Applications created');
+        console.log("application1 ID:", application1._id);
+        console.log("application2 ID:", application2._id);
 
         // 6. CREATE DOCUMENTS
         await Document.create({

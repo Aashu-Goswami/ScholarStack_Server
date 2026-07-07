@@ -37,7 +37,7 @@ const auditLogSchema = new mongoose.Schema(
             type : String,
             default : '',
             trim : true,
-            maxLength : [500, 'Remarks cannot exceed 500 characters']
+            maxlength : [500, 'Remarks cannot exceed 500 characters']
         }
     },
     {
@@ -49,11 +49,10 @@ auditLogSchema.index({ tenantId: 1, changedAt: -1 });
 auditLogSchema.index({ applicationId : 1, changedAt : -1 });
 auditLogSchema.index({ tenantId : 1, toStatus : 1, changedAt : -1 });
 
-auditLogSchema.pre('save', function(next) {
+auditLogSchema.pre('save', async function() {
   if (this.fromStatus === this.toStatus) {
-    return next(new Error('From status and to status cannot be the same'));
+    throw new Error('From status and to status cannot be the same');
   }
-  next();
 });
 
 module.exports = mongoose.model('AuditLog', auditLogSchema);

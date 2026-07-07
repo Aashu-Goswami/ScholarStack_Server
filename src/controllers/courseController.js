@@ -3,14 +3,17 @@ const Institution=require('../models/institution');
 
 // HELPER FUNCTION - RESOLVE TENANT ID FROM SUBDOMAIN
 const resolveTenantFromSubdomain = async (req) => {
-    const host=req.headers.host;
+    const host = req.headers.host;
+    if (!host) {
+        return null;
+    }
+    
     const hostname = host.split(':')[0];
     if (!hostname) {
         return null;
     }
 
     // FOR THE DEVELOPMENT PHASE ONLY
-   const hostname = host.split(':')[0];
    const subdomain = hostname.split('.')[0];
     if(subdomain === 'localhost'|| subdomain === '127.0.0.1'|| subdomain === 'www') {
         if(process.env.DEFAULT_TENANT_ID) {
