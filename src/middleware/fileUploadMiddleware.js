@@ -26,10 +26,11 @@ const fileFilter = (req, file, cb) => {
     const allowedExtensions = /pdf|png|jpg|jpeg/;
     const allowedMimeTypes = ['application/pdf', 'image/png', 'image/jpeg', 'image/jpg'];
 
-    const extName = allowedExtensions.test(path.extname(file.originalname).toLowerCase());
-    const mimeType = allowedMimeTypes.includes(file.mimetype);
+    const extOk = allowedExtensions.test(file.originalname);
+    const mimeOk = allowedMimeTypes.includes(file.mimetype);
+    const isOctetWithGoodExt = file.mimetype === 'application/octet-stream' && extOk;
 
-    if(extName && mimeType) {
+    if(extOk && (mimeOk || isOctetWithGoodExt)) {
         cb(null, true);
     } else {
         cb(new Error('Invalid file type. Only PDF, PNG, JPG, and JPEG are allowed.'), false);

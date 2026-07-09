@@ -88,7 +88,7 @@ const uploadDocument = async (req, res) => {
         }
 
         // Lock edits if the application status has progressed past the draft/pending review phase
-        if (application.status !== 'submitted' && application.status !== 'draft') {
+        if (application.status !== 'draft') {
             return res.status(400).json({ 
                 success: false, 
                 message: 'Documents can only be modified while application is pending or draft' 
@@ -141,21 +141,45 @@ const getDocuments = async (req, res) => {
         }
 
         const { applicationId } = req.params;
-        const filter = { applicationId, tenantId };
 
         // Enforce access control filter: students can only fetch their own files
         if (req.user.role === 'student') {
-            filter.studentId = req.user.id;
+            const application = await Application.findOne({
+                _id: applicationId,
+                tenantId,
+                applicantId: req.user.id
+            });
+
+            if (!application) {
+                return res.status(403).json({ 
+                    success: false, 
+                    message: 'Access denied. You can only view documents for your own applications.' 
+                });
+            }
+
+            const documents = await Document.find({
+                applicationId,
+                tenantId,
+                studentId: req.user.id
+            })
+                .populate('reviewedBy', 'name email')
+                .sort({ createdAt: -1 });
+
+            return res.status(200).json({ 
+                success: true, 
+                count: documents.length, 
+                data: documents 
+            });
         }
 
-        const documents = await Document.find(filter)
+        const documents = await Document.find({ applicationId, tenantId })
             .populate('reviewedBy', 'name email')
             .sort({ createdAt: -1 });
 
-        res.status(200).json({ 
-            success: true, 
-            count: documents.length, 
-            data: documents 
+        res.status(200).json({
+            success: true,
+            count: documents.length,
+            data: documents
         });
     } catch (err) {
         res.status(500).json({ 
@@ -177,13 +201,28 @@ const getDocumentById = async (req, res) => {
         }
 
         const { id } = req.params;
-        const filter = { _id : id, tenantId };
 
         if (req.user.role === 'student') {
-            filter.studentId = req.user.id;
+            const document = await Document.findOne({
+                _id: id,
+                tenantId,
+                studentId: req.user.id
+            }).populate('reviewedBy', 'name email');
+
+            if (!document) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Access denied. You can only view your own documents.'
+                });
+            }
+
+            return res.status(200).json({ 
+                success: true, 
+                data: document 
+            });
         }
 
-        const document = await Document.findOne(filter)
+        const document = await Document.findOne({ _id: id, tenantId})
             .populate('reviewedBy', 'name email');
 
         if (!document) {
@@ -221,7 +260,7 @@ const updateDocumentStatus = async (req, res) => {
         }
 
         const { status, remarks } = req.body;
-        const VALID_STATUSES = ['approved', 'rejected', 'pending'];
+        const VALID_STATUSES = ['approved', 'rejected', 'under review'];
         if (!status || !VALID_STATUSES.includes(status)) {
             return res.status(400).json({ 
                 success: false, 
