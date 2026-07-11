@@ -89,7 +89,10 @@ const seedData = async () => {
             name: 'B.Tech Computer Engineering',
             description: 'Four year undergraduate program in Computer Engineering',
             tenantId: institution._id,
-            eligibilityCriteria: { minPercentage: 60, subject: 'PCM' },
+            eligibilityCriteria: [
+                { field: 'twelfthPercentage', operator: '>=', value: 60 },
+                { field: 'twelfthMaths', operator: '>=', value: 50 }
+            ],
             admissionCapacity: 120,
             requiredDocuments: ['marksheet', 'certificate', 'idProof', 'photo'],
             session: '2026-27',
@@ -100,7 +103,10 @@ const seedData = async () => {
             name: 'B.Tech Electronics and Telecommunication',
             description: 'Four year undergraduate program in E&TC',
             tenantId: institution._id,
-            eligibilityCriteria: { minPercentage: 55, subject: 'PCM' },
+            eligibilityCriteria: [
+                { field: 'graduationPercentage', operator: '>=', value: 50 },
+                { field: 'entranceScore', operator: '>=', value: 70 }
+            ],
             admissionCapacity: 90,
             requiredDocuments: ['marksheet', 'certificate', 'idProof', 'photo'],
             session: '2026-27',
@@ -131,7 +137,12 @@ const seedData = async () => {
             tenantId: institution._id,
             courseId: course1._id,
             applicantId: student1._id,
-            personalDetails: { fullName: 'Dhriti Sharma', twelfthPercentage: 92, category: 'General' },
+            personalDetails: { 
+                fullName: 'Dhriti Sharma', 
+                twelfthPercentage: 92,
+                twelfthMaths: 85,
+                category: 'General' 
+            },
             session: '2026-27',
             status: 'submitted',
             submittedAt: new Date()
@@ -141,7 +152,12 @@ const seedData = async () => {
             tenantId: institution._id,
             courseId: course2._id,
             applicantId: student2._id,
-            personalDetails: { fullName: 'Rahul Verma', twelfthPercentage: 78, category: 'OBC' },
+            personalDetails: { fullName: 'Rahul Verma', 
+                twelfthPercentage: 78, 
+                graduationPercentage: 72,
+                entranceScore: 80,
+                category: 'OBC' 
+            },
             session: '2026-27',
             status: 'draft'
         });

@@ -43,8 +43,7 @@ const getAdminDashboard = async (req, res) => {
             under_review: 0,
             verified: 0,
             admitted: 0,
-            rejected: 0,
-            pending: 0
+            rejected: 0
         };
 
         let total = 0;
@@ -56,7 +55,7 @@ const getAdminDashboard = async (req, res) => {
         });
 
         // Compute summary aggregates
-        const pending = statusCounts.submitted + statusCounts.under_review + statusCounts.pending;
+        const under_review = statusCounts.submitted + statusCounts.under_review;
         const approved = statusCounts.admitted;
         const rejected = statusCounts.rejected;
         const verified = statusCounts.verified;
@@ -70,13 +69,13 @@ const getAdminDashboard = async (req, res) => {
             success: true,
             data: {
                 summary: {
-                    totalApplications: total,         // • Total Applications
-                    pendingApplications: pending,     // • Pending Applications
-                    approvedApplications: approved,   // • Approved Applications
-                    rejectedApplications: rejected,   // • Rejected Applications
+                    totalApplications: total,         
+                    under_reviewApplications: under_review,     
+                    approvedApplications: approved,   
+                    rejectedApplications: rejected,   
                     verifiedApplications: verified,
                     draftApplications: draft,
-                    admissionStatistics: {            // • Admission Statistics
+                    admissionStatistics: {           
                         conversionRatePercent: parseFloat(conversionRate),
                         rejectionRatePercent: parseFloat(rejectionRate)
                     }
@@ -119,7 +118,7 @@ const getStatsByCourse = async (req, res) => {
                     _id: '$courseId',
                     total: { $sum: 1 },
                     admitted: { $sum: { $cond: [{ $eq: ['$status', 'admitted'] }, 1, 0] } },
-                    pending: { $sum: { $cond: [{ $in: ['$status', ['submitted', 'under_review', 'pending']] }, 1, 0] } },
+                    under_review: { $sum: { $cond: [{ $in: ['$status', ['submitted', 'under_review']] }, 1, 0] } },
                     rejected: { $sum: { $cond: [{ $eq: ['$status', 'rejected'] }, 1, 0] } },
                     verified: { $sum: { $cond: [{ $eq: ['$status', 'verified'] }, 1, 0] } },
                     draft: { $sum: { $cond: [{ $eq: ['$status', 'draft'] }, 1, 0] } }
@@ -139,7 +138,7 @@ const getStatsByCourse = async (req, res) => {
             const stats = statsMap[course._id.toString()] || {
                 total: 0,
                 admitted: 0,
-                pending: 0,
+                under_review: 0,
                 rejected: 0,
                 verified: 0,
                 draft: 0
@@ -149,7 +148,7 @@ const getStatsByCourse = async (req, res) => {
                 courseName: course.name,
                 totalApplications: stats.total,
                 admittedApplications: stats.admitted,
-                pendingApplications: stats.pending,
+                under_reviewApplications: stats.under_review,
                 rejectedApplications: stats.rejected,
                 verifiedApplications: stats.verified,
                 draftApplications: stats.draft
@@ -200,6 +199,7 @@ const getStudentDashboard = async (req, res) => {
                 type: doc.type,
                 remarks: doc.remarks || 'No remarks provided'
             }));
+            const reviewedAt = app.reviewedAt || app.updatedAt || null;
 
             // Construct dynamic status timeline based on application status (Module 10 - Status Timeline)
             const timelineSteps = [
@@ -216,7 +216,7 @@ const getStudentDashboard = async (req, res) => {
                     status: ['under_review', 'verified', 'admitted', 'rejected'].includes(app.status) 
                         ? 'completed' 
                         : (app.status === 'submitted' ? 'current' : 'upcoming'), 
-                    date: ['under_review', 'verified', 'admitted', 'rejected'].includes(app.status) ? app.updatedAt : null 
+                    date: ['under_review', 'verified', 'admitted', 'rejected'].includes(app.status) ? reviewedAt : null 
                 },
                 { 
                     step: 'Verified', 
@@ -224,7 +224,7 @@ const getStudentDashboard = async (req, res) => {
                     status: ['verified', 'admitted', 'rejected'].includes(app.status) 
                         ? 'completed' 
                         : (app.status === 'under_review' ? 'current' : 'upcoming'), 
-                    date: ['verified', 'admitted', 'rejected'].includes(app.status) ? app.reviewedAt : null 
+                    date: ['verified', 'admitted', 'rejected'].includes(app.status) ? reviewedAt : null 
                 },
                 { 
                     step: 'Decision', 
@@ -232,7 +232,7 @@ const getStudentDashboard = async (req, res) => {
                     status: ['admitted', 'rejected'].includes(app.status) 
                         ? 'completed' 
                         : (app.status === 'verified' ? 'current' : 'upcoming'), 
-                    date: ['admitted', 'rejected'].includes(app.status) ? app.reviewedAt : null 
+                    date: ['admitted', 'rejected'].includes(app.status) ? reviewedAt : null 
                 }
             ];
 
@@ -243,9 +243,9 @@ const getStudentDashboard = async (req, res) => {
                     name: course ? course.name : 'Unknown Course',
                     session: app.session || (course ? course.session : '')
                 },
-                applicationProgress: app.status,     // • Application Progress
+                applicationProgress: app.status,     
                 remarks: app.remarks || '',
-                statusTimeline: timelineSteps,       // • Status Timeline
+                statusTimeline: timelineSteps,       
                 documents: {
                     uploaded: uploadedDocs.map(doc => ({
                         id: doc._id,
@@ -253,7 +253,7 @@ const getStudentDashboard = async (req, res) => {
                         type: doc.type,
                         status: doc.status
                     })),
-                    missingDocuments: missingDocs,   // • Missing Documents
+                    missingDocuments: missingDocs,   
                     rejectedDocuments: rejectedDocs
                 }
             });

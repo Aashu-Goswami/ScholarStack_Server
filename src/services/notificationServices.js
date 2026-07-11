@@ -98,7 +98,7 @@ const triggerNotification = async ({
                     emailSentAt : new Date()
                 });
             } catch (emailError) {
-                console.Error('Email sending failed : ', emailError.message);
+                console.error('Email sending failed : ', emailError.message);
             }
         }
 
