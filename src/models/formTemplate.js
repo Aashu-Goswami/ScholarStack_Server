@@ -1,3 +1,5 @@
+// FORM TEMPLATE MODEL
+
 const mongoose = require('mongoose');
 const formFieldSchema = require('./formField');
 
@@ -15,7 +17,7 @@ const formTemplateSchema = new mongoose.Schema(
         },
         session : {
             type : String,
-            required : true,
+            required : [true, 'Session is required'],
             trim : true,
             default : () => {
                 const year = new Date().getFullYear();
@@ -24,7 +26,7 @@ const formTemplateSchema = new mongoose.Schema(
         },
         fields : {
             type : [formFieldSchema],
-            required : true,
+            required : [true, 'Atleast one field is required'],
             validate : {
                 validator : function(v) {
                     return v && v.length > 0;
@@ -39,7 +41,7 @@ const formTemplateSchema = new mongoose.Schema(
         createdBy : {
             type : mongoose.Schema.Types.ObjectId,
             ref : 'User',
-            required : true
+            required : [true, 'Created by user Id is required']
         }
     },
     {
@@ -47,7 +49,19 @@ const formTemplateSchema = new mongoose.Schema(
     }
 );
 
-// One active form template per course per tenant
 formTemplateSchema.index({ courseId: 1, session : 1, tenantId: 1 }, { unique: true });
+formTemplateSchema.index({ tenantId: 1, createdAt: -1 });
+formTemplateSchema.index({ courseId: 1, tenantId: 1 });
+
+formTemplateSchema.pre('save',async  function() {
+    if (this.fields && this.fields.length > 0) {
+        const fieldIds = this.fields.map(f => f.fieldKey);
+        const uniqueFieldIds = new Set(fieldIds);
+        
+        if (fieldIds.length !== uniqueFieldIds.size) {
+            throw new Error('Duplicate fieldId detected. Each field must have a unique fieldId');
+        }
+    }
+});
 
 module.exports = mongoose.model('FormTemplate', formTemplateSchema);

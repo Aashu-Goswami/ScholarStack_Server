@@ -1,3 +1,7 @@
+// THIS MODULE HANDLES CRUD OPERATIONS FOR INSTITUION 
+// INSTITUTION ADMIN CAN MANAGE : NAME, LOGO, CONTACT INFO, ADDRESS, WEBSITE, ADMISSION SESIION
+// SUPER ADMIN CAN CREATE AND MANAGE INSTITUTION
+
 const Institution = require('../models/institution');
 
 // GET ALL INSTITUTIONS FUNCTION
@@ -18,7 +22,7 @@ const getInstitutions = async (req, res) => {
     }
 };
 
-// GET SINGLE INSTITUTION BY ID FUNCTION
+// GET A SINGLE INSTITUTION BY ID FUNCTION
 const getInstitutionById = async (req, res) => {
     try {
         const { id } = req.params;
@@ -46,6 +50,12 @@ const getInstitutionById = async (req, res) => {
             data : institution
         });
     } catch (err) {
+        if (err.name === 'CastError' || err.kind === 'ObjectId') {
+            return res.status(404).json({
+                success: false,
+                message: 'Institution not found'
+            });
+        }
         res.status(500).json({
             success : false,
             message : err.message
@@ -59,11 +69,21 @@ const createInstitution = async (req, res) => {
         // GET REQUIRED FIELDS FROM REQUEST
         const { name, subdomain, logo, contactEmail, contactPhone, address, website, admissionSession } = req.body;
 
-        // BASIC VALIDATION
+        // VALIDATE REQUIRED FIELDS
         if(!name || !subdomain) {
             return res.status(400).json({
                 success : false,
                 message : 'Please provide institution name and subdomain'
+            });
+        }
+
+        // VALIDATE SUBDOMAIN FORMAT
+        const isValidSubdomain = (subdomain) => { return /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(subdomain); };
+        const normalizedSubdomain = subdomain.toLowerCase().trim();
+        if (!isValidSubdomain(normalizedSubdomain)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Subdomain can only contain lowercase letters, numbers, and hyphens'
             });
         }
 
@@ -78,8 +98,8 @@ const createInstitution = async (req, res) => {
 
         // CREATE NEW INSTITUTION
         const institution = await Institution.create({
-            name,
-            subdomain : subdomain.toLowerCase(),
+            name : name.trim(),
+            subdomain : normalizedSubdomain,
             logo : logo || '',
             contactEmail : contactEmail || '',
             contactPhone : contactPhone || '',
@@ -127,13 +147,13 @@ const updateInstitution = async (req, res) => {
         // UPDATE ALLOWED FIELDS ONLY
         const { name, logo, contactEmail, contactPhone, address, website, admissionSession } = req.body;
 
-        if(name) institution.name = name;
+        if(name) institution.name = name.trim();
         if(logo) institution.logo = logo;
-        if(contactEmail) institution.contactEmail = contactEmail;
-        if(contactPhone) institution.contactPhone = contactPhone;
-        if(address) institution.address = address;
-        if(website) institution.website = website;
-        if(admissionSession) institution.admissionSession = admissionSession;
+        if(contactEmail) institution.contactEmail = contactEmail.trim();
+        if(contactPhone) institution.contactPhone = contactPhone.trim();
+        if(address) institution.address = address.trim();
+        if(website) institution.website = website.trim();
+        if(admissionSession) institution.admissionSession = admissionSession.trim();
 
         await institution.save();
 
@@ -143,6 +163,12 @@ const updateInstitution = async (req, res) => {
             data : institution
         });
     } catch (err) {
+        if (err.name === 'CastError' || err.kind === 'ObjectId') {
+            return res.status(404).json({
+                success: false,
+                message: 'Institution not found'
+            });
+        }
         res.status(500).json({
             success : false,
             message : err.message

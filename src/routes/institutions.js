@@ -8,7 +8,7 @@ const {
   deleteInstitution
 } = require('../controllers/institutionController');
 const { protect } = require('../middleware/authMiddleware');
-const { superAdminOnly, instAdminOnly, superAdminOrOwnInstitution } = require('../middleware/roleCheckerMiddleware');
+const { superAdminOnly, superAdminOrOwnInstitution } = require('../middleware/roleCheckerMiddleware');
 
 // PROTECTED ROUTES - SUPER ADMIN ONLY
 router.get('/', protect, superAdminOnly, getInstitutions);

@@ -1,5 +1,8 @@
+// THIS MODULE HANDLES THE STUDENT CLASSIFICATION ENGINE WHICH EVALUATES APPLICATIONS AGAINST CONFIGURABLE CRITERIA 
+
 const Application = require('../models/application');
 const ClassificationRule = require('../models/classificationRule');
+const mongoose = require('mongoose');
 const { classifyApplication } = require('../services/classificationEngine');
 
 // GET CLASSIFICATION RULES FOR THE INSTITUTION
@@ -13,6 +16,7 @@ const getClassificationRules = async (req, res) => {
             });
         }
 
+        // FIND EXISTING RULES - IF NO RULES EXIST, RETURN DEFAULT CONFIGURATION
         let rules = await ClassificationRule.findOne({ tenantId });
         if(!rules) {
             rules = {
@@ -56,11 +60,13 @@ const updateClassificationRules = async (req, res) => {
             courseSpecificRules
         } = req.body;
 
+        // FIND OR CREATE RULES DOCUMENT 
         let rules = await ClassificationRule.findOne({ tenantId });
         if(!rules) {
             rules = new ClassificationRule({ tenantId });
         }
 
+        // UPDATE ONLY PROVIDED FIELDS
         if (highMeritThreshold !== undefined) rules.highMeritThreshold = highMeritThreshold;
         if (mediumMeritThreshold !== undefined) rules.mediumMeritThreshold = mediumMeritThreshold;
         if (reservedCategories) rules.reservedCategories = reservedCategories;
@@ -95,6 +101,7 @@ const classifySingleApplication = async (req, res) => {
 
         const { applicationId } = req.params;
 
+        // FIND APPLICATION WITH COURSE POPULATED
         const application = await Application.findOne({
             _id : applicationId,
             tenantId
@@ -107,9 +114,11 @@ const classifySingleApplication = async (req, res) => {
             });
         }
 
+        // LOAD CLASSIFICATION RULES AND RUN CLASSIFICATION ENGINE
         const rules = await ClassificationRule.findOne({ tenantId }) || {};
         const classification = classifyApplication(application, rules);
 
+        // SAVE CLASSIFICATION TO APPLICATION
         application.classification = classification;
         await application.save();
 
@@ -140,6 +149,7 @@ const classifyAllApplications = async (req, res) => {
             });
         }
 
+        // FETCH ALL APPLICATIONS WITH POPULATED DATA
         const applications = await Application.find({ tenantId })
             .populate('courseId')
             .populate('documents');
@@ -152,8 +162,10 @@ const classifyAllApplications = async (req, res) => {
             });
         }
 
+        // LOAD CLASSIFICATION RULES
         const rules = await ClassificationRule.findOne({ tenantId }) || {};
 
+        // BUILD BULK UPDATE OPERATIONS
         const bulkOps = applications.map(app => {
             const classification = classifyApplication(app, rules);
             return {
@@ -181,7 +193,7 @@ const classifyAllApplications = async (req, res) => {
     }
 };
 
-// GET ALL APPLICATIONS WITH THEIR CLASSIFICATION
+// GET ALL APPLICATIONS WITH THEIR CLASSIFICATION DATA
 const getClassifications = async (req, res) => {
     try {
         const tenantId = req.user.tenantId;
@@ -192,32 +204,36 @@ const getClassifications = async (req, res) => {
             });
         }
 
+        // PARSE QUERY PARAMETERS WITH DEFAULTS
         const { course, status, category, meritLevel, page = 1, limit = 25 } = req.query;
+        const parsedLimit = Math.min(parseInt(limit) || 25, 100);
 
+        // BUILD FILTER
         const filter = { tenantId };
         if(course) filter.courseId = course;
         if(status) filter.status = status;
-
         if(category) filter['classification.category'] = category;
         if(meritLevel) filter['classification.meritLevel'] = meritLevel;
 
-        const skip = (parseInt(page) - 1) * parseInt(limit);
+        const skip = (parseInt(page) - 1) * parsedLimit;
 
-        const applications = await Application.find(filter)
-            .populate('applicantId', 'name email')
-            .populate('courseId', 'name session')
-            .sort({ createdAt : -1 })
-            .skip(skip)
-            .limit(parseInt(limit));
-
-        const total = await Application.countDocuments(filter);
+        // FETCH APPLICATIONS WITH PAGINATION
+        const [applications, total] = await Promise.all([ 
+            Application.find(filter)
+                .populate('applicantId', 'name email')
+                .populate('courseId', 'name session')
+                .sort({ createdAt : -1 })
+                .skip(skip)
+                .limit(parsedLimit),
+            Application.countDocuments(filter)
+        ]);
 
         res.status(200).json({
             success : true,
             count : applications.length,
             total,
             page : parseInt(page),
-            pages : Math.ceil(total / parseInt(limit)),
+            pages : Math.ceil(total / parsedLimit),
             data : applications.map(app => ({
                 applicationId : app._id,
                 applicant : app.applicantId,
@@ -246,8 +262,11 @@ const getClassificationStats = async (req, res) => {
             });
         }
 
+        const tenantObjectId = new mongoose.Types.ObjectId(tenantId);
+
+        // OVERALL STATISTICS
         const stats = await Application.aggregate([
-            { $match : { tenantId : tenantId } },
+            { $match : { tenantId : tenantObjectId } },
             {
                 $group : {
                     _id : null,
@@ -263,13 +282,15 @@ const getClassificationStats = async (req, res) => {
             }
         ]);
 
+        // CATEGORY BREAKDOWN
         const categoryStats = await Application.aggregate([
-            { $match : { tenantId : tenantId } },
+            { $match : { tenantId : tenantObjectId } },
             { $group : { _id : '$classification.category', count : { $sum : 1 } } }
         ]);
 
+        // COURSE-MERIT BREAKDOWN
         const courseMeritStats = await Application.aggregate([
-            { $match : { tenantId : tenantId } },
+            { $match : { tenantId : tenantObjectId } },
             { $group : { _id : { course : '$courseId', merit : '$classification.meritLevel' }, count : { $sum : 1 } } }
         ]);
 
@@ -321,7 +342,9 @@ const filterByClassification = async (req, res) => {
             page = 1,
             limit = 25
         } = req.query;
+        const parsedLimit = Math.min(parseInt(limit) || 25, 100);
 
+        // BUILD FILTER
         const filter = { tenantId };
 
         if(eligible !== undefined) filter['classification.eligible'] = eligible === 'true';
@@ -336,7 +359,7 @@ const filterByClassification = async (req, res) => {
             filter.createdAt.$lte = new Date(dateTo);
         }
 
-        const skip = (parseInt(page) - 1) * parseInt(limit);
+        const skip = (parseInt(page) - 1) * parsedLimit;
         const applications = await Application.find(filter)
             .populate('applicantId', 'name email')
             .populate('courseId', 'name session')
@@ -351,7 +374,7 @@ const filterByClassification = async (req, res) => {
             count : applications.length,
             total,
             page : parseInt(page),
-            pages : Math.ceil(total / parseInt(limit)),
+            pages : Math.ceil(total / parsedLimit),
             data : applications
         });
     } catch (err) {
@@ -375,6 +398,7 @@ const getApplicationByClassification = async(req, res) => {
         
         const { classificationId } = req.params;
 
+        // BUILD FILTER BASED ON CLASSIFICATION TYPE
         const allowedMeritLevels = ['High Merit', 'Medium Merit', 'Low Merit'];
         let filter = { tenantId };
 
@@ -388,6 +412,7 @@ const getApplicationByClassification = async(req, res) => {
             filter['classification.category'] = classificationId;
         }
 
+        // FETCH APPLICATIONS
         const applications = await Application.find(filter)
             .populate('applicantId', 'name email')
             .populate('courseId', 'name session')

@@ -1,3 +1,5 @@
+// COURSE MODEL
+
 const mongoose=require('mongoose');
 
 const courseSchema=new mongoose.Schema(
@@ -5,12 +7,14 @@ const courseSchema=new mongoose.Schema(
         name : {
             type : String,
             required : [true, 'Please add a course name'],
-            trim : true
+            trim : true,
+            maxlength : [50, 'Course name cannot exceed 50 characters']
         },
         description : {
             type : String,
             default : '',
-            trim : true
+            trim : true,
+            maxlength : [150, 'Description cannot exceed 150 characters']
         },
         tenantId : {
             type : mongoose.Schema.Types.ObjectId,
@@ -23,7 +27,8 @@ const courseSchema=new mongoose.Schema(
         },
         admissionCapacity : {
             type : Number,
-            default : 0
+            default : 0,
+            min : 0
         },
         requiredDocuments : {
             type : [String],
@@ -37,7 +42,7 @@ const courseSchema=new mongoose.Schema(
         createdBy : {
             type : mongoose.Schema.Types.ObjectId,
             ref : 'User',
-            required : true
+            required : [true, 'Created by user Id is required']
         },
         isActive : {
             type : Boolean,
@@ -49,7 +54,6 @@ const courseSchema=new mongoose.Schema(
     }
 );
 
-// Compound index to ensure course name is unique per institution (tenant)
 courseSchema.index({ name : 1, tenantId : 1 },{ unique : true });
 courseSchema.index({ tenantId : 1, createdAt : -1 });
 

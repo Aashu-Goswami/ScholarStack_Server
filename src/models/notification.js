@@ -1,3 +1,5 @@
+// NOTIFICATION MODEL
+
 const mongoose = require('mongoose');
 
 const notificationSchema = new mongoose.Schema(
@@ -18,7 +20,7 @@ const notificationSchema = new mongoose.Schema(
             type: String,
             required: [true, 'Please add notification title'],
             trim: true,
-            maxlength : [50, 'Ttile cannot exceed 50 characters']
+            maxlength : [50, 'Title cannot exceed 50 characters']
         },
         message: {
             type: String,
@@ -40,6 +42,28 @@ const notificationSchema = new mongoose.Schema(
         readAt : {
             type : Date,
             default : null
+        },
+        sourceId: {
+            type: mongoose.Schema.Types.ObjectId,
+            refPath: 'sourceModel',
+            default: null
+        },
+        sourceModel: {
+            type: String,
+            enum: ['Application', 'Document', 'User'],
+            default: null
+        },
+        metadata: {
+            type: mongoose.Schema.Types.Mixed,
+            default: {}
+        },
+        emailSent: {
+            type: Boolean,
+            default: false
+        },
+        emailSentAt: {
+            type: Date,
+            default: null
         }
     },
     {
@@ -51,12 +75,17 @@ notificationSchema.index({ userId: 1, isRead: 1 });
 notificationSchema.index({ userId: 1, createdAt: -1 });
 notificationSchema.index({ userId: 1, isRead: 1, createdAt: -1 });
 notificationSchema.index({ tenantId: 1, createdAt: -1 });
+notificationSchema.index({ sourceId: 1, sourceModel: 1 });
 
-// notificationSchema.pre('save', function(next) {
-//   if (this.isModified('isRead') && this.isRead === true && !this.readAt) {
-//     this.readAt = new Date();
-//   }
-//   next();
-// });
+notificationSchema.pre('save', async function() {
+    if (this.isModified('isRead')) {
+        if (this.isRead === true && !this.readAt) {
+            this.readAt = new Date();
+        }
+        if (this.isRead === false) {
+            this.readAt = null;
+        }
+    }
+});
 
 module.exports = mongoose.model('Notification', notificationSchema);

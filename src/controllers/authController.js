@@ -1,3 +1,5 @@
+// THIS MODULE HANDLES USER AUTHENTICATION AND AUTHORIZATION 
+
 const User = require('../models/user');
 const Institution = require('../models/institution');
 
@@ -6,44 +8,18 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { sendEmail } = require('../services/emailService');
 const { triggerNotification } = require('../services/notificationServices');
+const { resolveTenantFromSubdomain } = require('../middleware/tenantResolverMiddleware');
 
-// HELPER FUNCTION TO GENERATE TOKEN
+// HELPER FUNCTION TO GENERATE JWT TOKEN FOR AUTHENTICATED USERS
 const generateToken = (userId, role, tenantId) => {
     return jwt.sign(
         { id : userId, role, tenantId },
         process.env.JWT_SECRET,
         { expiresIn : process.env.JWT_EXPIRES_IN || '30d' }
-
     );
 };
 
-// HELPER FUNCTION TO RESOLVE TENANT FROM SUBDOMAIN
-const resolveTenant = async (req) => {
-    const host = req.headers.host;
-
-    // GET SUBDOMAIN FROM THE HOST
-    const hostname = host.split(':')[0];
-    const subdomain = hostname.split('.')[0];
-
-    if(subdomain === 'localhost' || subdomain === 'scholarstack' || subdomain === 'www' || subdomain === '127.0.0.1' || subdomain === 'super') {
-        // DEFAULT TENANT ID FOR DEVELOPMENT
-        if(process.env.DEFAULT_TENANT_ID) {
-            return process.env.DEFAULT_TENANT_ID;
-        }
-
-        // NO TENANT - FOR SUPER ADMIN ROUTES
-        return null;
-    }
-
-    // SUBDOMAIN FROM THE DATABASE
-    const institution = await Institution.findOne({ subdomain }).select('_id');
-    if(!institution) {
-        throw new Error('Invalid Tenant Subdomain');
-    }
-    return institution._id;
-};
-
-// REGISTER A NEW STUDENT FUNCTION 
+// REGISTER A NEW STUDENT - REGISTER A NEW STUDENT UNDER A SPECIFIC INSTITUTION
 const registerStudent = async (req, res) => {
     try {
         // GET NAME, EMAIL, PASSWORD FROM REQUEST
@@ -58,7 +34,7 @@ const registerStudent = async (req, res) => {
         // RESOLVE TENANT FROM SUBDOMAIN
         let tenantId;
         try {
-            tenantId = await resolveTenant(req);
+            tenantId = await resolveTenantFromSubdomain(req, { throwOnInvalid: true });
             if(!tenantId) {
                 return res.status(400).json({
                     success : false,
@@ -95,17 +71,19 @@ const registerStudent = async (req, res) => {
             isEmailVerified : true
         });
 
-        // Trigger Registration Success Notification (In-app and Email)
+        // TRIGGER REGISTRATION NOTIFICATION
         await triggerNotification({
-            recipient: user._id,
+            userId: user._id,
+            tenantId: tenantId,
+            type: 'registration_success',
+            title: 'Welcome to Scholar Stack',
             message: 'Your registration with ScholarStack was successful!',
-            type: 'registration',
-            tenantId,
             email: user.email,
             emailSubject: 'Welcome to ScholarStack - Registration Successful',
             emailMessage: `Hi ${user.name},\n\nYour account has been registered successfully on our admissions portal.\n\nYou can now log in, configure your profile, and start your course applications.\n\nBest regards,\nAdmissions Team`
         });
 
+        // GENERATE A JWT TOKEN
         const token = generateToken(user._id, user.role, user.tenantId);
         
         res.status(201).json({
@@ -126,7 +104,7 @@ const registerStudent = async (req, res) => {
     }
 };
 
-// LOGIN FUNCTION 
+// LOGIN FUNCTION - AUTHENTICATE USER AND RETURN JWT TOKEN
 const login = async (req, res) => {
     try {
         const { email, password } = req.body;
@@ -137,16 +115,15 @@ const login = async (req, res) => {
             });
         }
 
-        // RESOLVE TENANT - FOR STUDENTS AND INSTITUTION ADMINS
+        // CHECK SUPER ADMIN FIRST 
         let user = await User.findOne({ email, role : 'superAdmin' });
         let tenantId = null;
         
         if(!user) {
+            // NOT SUPER ADMIN - RESOLVE TENANT
             try {
-                tenantId = await resolveTenant(req);
+                tenantId = await resolveTenantFromSubdomain(req, { throwOnInvalid: true });
             } catch (err) {
-            
-                // IF TENANT RESOLUTION FAILS, IT MIGHT BE SUPER ADMIN
                 const host = req.headers.host;
                 const hostname = host ? host.split(':')[0] : '';
                 const subdomain = hostname ? hostname.split('.')[0] : '';
@@ -158,10 +135,9 @@ const login = async (req, res) => {
                     });
                 }
                 tenantId = null; 
-            // FOR SUPER ADMIN, TENANT ID REMAINS NULL
             }
 
-            // FIND USER - SUPER ADMIN CAN LOGIN WITHOUT TENANT ID
+            // FIND USER WITH TENANT
             if(tenantId) {
                 user = await User.findOne({ email, tenantId });
             } else {
@@ -193,6 +169,7 @@ const login = async (req, res) => {
             });
         }
 
+        // GENERATE TOKEN
         const token = generateToken(user._id, user.role, user.tenantId || null); 
         res.status(200).json({
             success : true,
@@ -213,10 +190,9 @@ const login = async (req, res) => {
     }
 };
 
-// FORGOT PASSWORD FUCNTION - SEND RESET TOKEN VIA EMAIL
+// FORGOT PASSWORD FUCNTION - REQUEST A PASSWORD RESET EMAIL
 const forgotPassword = async (req, res) => {
     try {
-        // GET TENANT USING IT'S ID
         const { email } = req.body;
         if (!email) {
             return res.status(400).json({
@@ -225,12 +201,13 @@ const forgotPassword = async (req, res) => {
             });
         }
 
+        // CHECK THE SUPER ADMIN FIRST
         let user = await User.findOne({ email, role : 'superAdmin' });
         let tenantId = null;
 
         if(!user) {
             try {
-                tenantId = await resolveTenant(req);
+                tenantId = await resolveTenantFromSubdomain(req, { throwOnInvalid: true });
             } catch (err) {
                 return res.status(400).json({ 
                     success : false, 
@@ -253,13 +230,13 @@ const forgotPassword = async (req, res) => {
             });
         }
 
-        // GENERATE RESET TOKEN AND SET TOKEN EXPIRE TIMER
+        // GENERATE RESET TOKEN (EXPIRES IN 10 MINUTES)
         const resetToken = crypto.randomBytes(32).toString('hex');
         user.resetPasswordToken = crypto.createHash('sha256').update(resetToken).digest('hex');
         user.resetPasswordExpire = Date.now() + 10 * 60 * 1000;
         await user.save();
 
-        // SEND EMAIL
+        // SEND RESET EMAIL
         const resetUrl = `${req.protocol}://${req.get('host')}/reset-password/${resetToken}`;
         const message = `You requested a password reset. Please go to: ${resetUrl}`;
 
@@ -274,8 +251,9 @@ const forgotPassword = async (req, res) => {
                 message : 'Email Sent'
             });
         } catch (err) {
-            user.resetPasswordToken = undefined,
-            user.resetPasswordExpire = undefined,
+            // CLEAR TOKEN IF EMAIL FAILS
+            user.resetPasswordToken = undefined;
+            user.resetPasswordExpire = undefined;
             await user.save();
 
             return res.status(500).json({
@@ -291,13 +269,14 @@ const forgotPassword = async (req, res) => {
     }
 };
 
-// RESET PASSWORD FUNCTION - USING TOKEN
+// RESET PASSWORD FUNCTION - USING THE TOKEN FROM EMAIL
 const resetPassword = async (req, res) => {
     try {
         // CREATE NEW TOKEN USING EXISTING TOKEN
         const { token, newPassword } = req.body;
         const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
 
+        // FIND USER WITH VALID TOKEN
         const user = await User.findOne({
             resetPasswordToken : hashedToken,
             resetPasswordExpire : { $gt : Date.now() }
@@ -313,8 +292,8 @@ const resetPassword = async (req, res) => {
         // UPDATE PASSWORD
         const salt = await bcrypt.genSalt(10);
         user.passwordHash = await bcrypt.hash(newPassword, salt);
-        user.resetPasswordToken = undefined,
-        user.resetPasswordExpire = undefined,
+        user.resetPasswordToken = undefined;
+        user.resetPasswordExpire = undefined;
         await user.save();
 
         res.status(200).json({
@@ -348,6 +327,7 @@ const verifyEmail = async (req, res) => {
             });
         }
 
+        // MARK EMAIL AS VERIFIED
         user.isEmailVerified = true;
         user.emailVerificationToken = undefined;
         user.emailVerificationExpire = undefined;
@@ -399,7 +379,7 @@ const changePassword = async (req, res) => {
     }
 };
 
-// REGISTER A NEW INSTITUTION ADMIN - ONLY SUPER ADMIN
+// REGISTER THE FIRST INSTITUTION ADMIN - ONLY SUPER ADMIN
 const registerInstitutionAdmin = async (req, res) => {
     try{
         // GET REQUIRED FIELDS FROM REQUEST
@@ -411,7 +391,7 @@ const registerInstitutionAdmin = async (req, res) => {
             });
         }
 
-        // FIND THE INSTITUTION BY ID
+        // VERIFY INSTITUTION EXISTS
         const institution = await Institution.findById(tenantId);
         if(!institution) {
             return res.status(404).json({
@@ -429,14 +409,14 @@ const registerInstitutionAdmin = async (req, res) => {
             });
         }
 
-        // HASH THE PASSWORD
+        // HASH THE PASSWORD AND GENERATE VERIFICATION TOKEN
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password, salt);
 
         const verificationToken = crypto.randomBytes(32).toString('hex');
         const hashedVerificationToken = crypto.createHash('sha256').update(verificationToken).digest('hex');
 
-        // CREATE NEW INSTITUTION USER
+        // CREATE NEW INSTITUTION ADMIN USER
         const user = await User.create({
             name,
             email, 
@@ -454,6 +434,18 @@ const registerInstitutionAdmin = async (req, res) => {
             email : user.email,
             subject : 'Verify your email to access admin panel',
             message : `Please click : ${verifyUrl}`
+        });
+
+         // TRIGGER NOTIFICATION FOR NEW ADMIN
+        await triggerNotification({
+            userId: user._id,
+            tenantId: tenantId,
+            type: 'registration_success',
+            title: 'Welcome as Admin',
+            message: `You have been added as an admin for ${institution.name}. Please verify your email to access the admin panel.`,
+            email: user.email,
+            emailSubject: `Welcome as Admin - ${institution.name}`,
+            emailMessage: `Hi ${name},\n\nYou have been added as an administrator for ${institution.name}.\n\nPlease verify your email using the link sent to you.\n\nRegards,\n${institution.name} Team`
         });
 
         res.status(201).json({
@@ -540,10 +532,10 @@ const addInstitutionAdmin = async (req, res) => {
         // TRIGGER NOTIFICATION FOR THE NEW ADMIN
         await triggerNotification({
             userId: user._id,
+            tenantId: tenantId,
             title: 'Welcome as Admin',
-            type: 'registration',
+            type: 'registration_success',
             message: `You have been added as an admin for ${institution.name}. Please verify your email to access the admin panel.`,
-            tenantId,
             email: user.email,
             emailSubject: `Welcome as Admin - ${institution.name}`,
             emailMessage: `Hi ${name},\n\nYou have been added as an administrator for ${institution.name}.\n\nPlease verify your email using the link sent to you.\n\nRegards,\n${institution.name} Team`

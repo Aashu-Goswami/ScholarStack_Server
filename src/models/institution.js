@@ -1,3 +1,5 @@
+// INSTITUTION MODEL
+
 const mongoose = require('mongoose');
 
 const institutionSchema = new mongoose.Schema(
@@ -6,7 +8,7 @@ const institutionSchema = new mongoose.Schema(
             type : String,
             required : [true, 'Please add institution name'],
             trim : true,
-            maxLength : [50, 'Institution name cannot be more than 50 characters']
+            maxlength : [50, 'Institution name cannot be more than 50 characters']
         },
         subdomain : {
             type : String,
@@ -15,7 +17,7 @@ const institutionSchema = new mongoose.Schema(
             lowercase : true,
             trim : true,
             match : [/^[a-z0-9-]+$/, 'Subdomain can only contain lowercase letters, numbers, and hyphens'],
-            maxLength : [50, 'Subdomain cannot be more than 50 characters']
+            maxlength : [50, 'Subdomain cannot be more than 50 characters']
         },
         logo : {
             type : String,
@@ -34,7 +36,7 @@ const institutionSchema = new mongoose.Schema(
         address : {
             type : String,
             default : '',
-            maxLength : [100, 'Address cannot be more than 100 characters']
+            maxLength : [150, 'Address cannot be more than 150 characters']
         },
         website : {
             type : String,

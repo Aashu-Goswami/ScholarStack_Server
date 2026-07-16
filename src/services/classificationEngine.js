@@ -1,14 +1,11 @@
-/**
- * Dynamically classifies a student application based on:
- * - Academic Marks
- * - Course Eligibility Criteria
- * - Category
- */
+// STUDENT CLASSIFICATION ENGINE
+// DYNAMICALLY CLASSIFIES A STUDENT APPLICATION BASED ON - ACADEMIC MARKS, COURSE ELIGIBILITY CRITERIA AND CATEGORY 
 
 const evaluateCriteria = (criteria, details) => {
     const {field, operator, value} = criteria;
     const actualValue = details[field];
 
+    // CHECK IF FIELD EXISTS IN THE APPLICATION DATA
     if(actualValue === undefined || actualValue === null) {
         return {
             passed: false,
@@ -17,6 +14,7 @@ const evaluateCriteria = (criteria, details) => {
         };
     }
 
+    // APPLY THE COMPARISON OPERATOR
     let passed = false;
     switch(operator) {
         case '>=':
@@ -40,15 +38,20 @@ const evaluateCriteria = (criteria, details) => {
     };
 };
 
+// CLASSIFICATION FUNCTION - EVALUATES AN APPLICATION AGAINST ELIGIBILITY CRITERIA AND RETURNS RESULT
 const classifyApplication = (application, rules = {}) => {
+
+    // EXTRACT DATA
     const course = application.courseId || {};
     const details = application.personalDetails || {};
     const category = details.category || 'General';
     const reservedCategories = rules.reservedCategories || ['SC', 'ST', 'OBC', 'EWS'];
     const isReserved = reservedCategories.some(cat => cat.toLowerCase() === category.toLowerCase());
 
+    // BUILD ELIGIBILITY CRITERIA 
     let criteria = [];
 
+    // GET CRITERIA FROM COURSE
     if(course.eligibilityCriteria) {
         if(Array.isArray(course.eligibilityCriteria)) {
             criteria = course.eligibilityCriteria;
@@ -60,6 +63,7 @@ const classifyApplication = (application, rules = {}) => {
         }
     }
 
+    // OVER-RIDE WITH COURSE SPECIFIC RULES
     if(rules.courseSpecificRules && rules.courseSpecificRules[course._id]) {
         const courseRules = rules.courseSpecificRules[course._id];
         if(courseRules.criteria) {
@@ -73,11 +77,13 @@ const classifyApplication = (application, rules = {}) => {
         }
     }
 
+    // FALLBACK IF NO CRITERIA DEFINED
     if(criteria.length === 0) {
         const minMarks = rules.eligibilityMinMarks || 0;
         criteria = [{field: 'twelfthPercentage', operator: '>=', value: minMarks}];
     }
 
+    // EVALUATE CRITERIA 
     const results = criteria.map(criterion => evaluateCriteria(criterion, details));
     const allPassed = results.every(result => result.passed);
     const failedReasons = results
@@ -85,8 +91,9 @@ const classifyApplication = (application, rules = {}) => {
         .map(result => result.reason)
         .join('; ');
 
+    // COMPUTE MERIT SCORE
     let score = 0;
-    const firstNumeric = criteria.find(criterion => details[criterion.field] === 'undefined');
+    const firstNumeric = criteria.find(criterion => details[criterion.field] !== undefined && details[criterion.field] !== null);
     if(firstNumeric) {
         score = parseFloat(details[firstNumeric.field]) || 0;
     } else {
@@ -95,6 +102,7 @@ const classifyApplication = (application, rules = {}) => {
                 parseFloat(details.academicMarks) || 0;
     }
 
+    // DETERMINE MERIT LEVEL
     const highMeritThreshold = rules.highMeritThreshold || 90;
     const mediumMeritThreshold = rules.mediumMeritThreshold || 65;
 
@@ -105,6 +113,7 @@ const classifyApplication = (application, rules = {}) => {
         meritLevel = 'Medium Merit';
     }
 
+    // BUILD CLASSIFICATION MODEL
     const classification = {
         eligible: allPassed,
         meritLevel,

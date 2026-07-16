@@ -1,10 +1,13 @@
+// USER MODEL
+
 const mongoose = require('mongoose');
 
 const userSchema = new mongoose.Schema({
         name : {
             type : String,
             required : [true, 'Please add a name'],
-            trim : true
+            trim : true,
+            maxlength : [30, 'Name cannot exceed 30 characters']
         },
         email : {
             type : String,
@@ -16,7 +19,7 @@ const userSchema = new mongoose.Schema({
         },
         passwordHash : {
             type : String,
-            required : true
+            required : [true, 'Password is required']
         },
         role : {
             type : String,
@@ -38,10 +41,22 @@ const userSchema = new mongoose.Schema({
             type : Boolean,
             default : false
         },
-        emailVerificationToken : String,
-        emailVerificationExpire : Date,
-        resetPasswordToken : String,
-        resetPasswordExpire : Date
+        emailVerificationToken : {
+            type : String,
+            default : undefined
+        },
+        emailVerificationExpire : {
+            type : Date,
+            default : undefined
+        },
+        resetPasswordToken : {
+            type : String,
+            default : undefined
+        },
+        resetPasswordExpire : {
+            type : Date,
+            default : undefined
+        }
     },
     {
         timestamps : true
@@ -49,14 +64,13 @@ const userSchema = new mongoose.Schema({
 );
 
 userSchema.index(
-    {
-        email : 1,
-        tenantId : 1
-    },
+    { email : 1, tenantId : 1 },
     { 
         unique : true,
         partialFilterExpression : { tenantId : { $ne : null } }
     }
 );
+userSchema.index({ tenantId : 1, role : 1 });
+userSchema.index({ email : 1 });
 
 module.exports = mongoose.model('User', userSchema); 

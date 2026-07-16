@@ -1,54 +1,15 @@
-/**
- * @file controllers/documentController.js
- * @description Controller handling document operations for the ScholarStack portal (Module 6).
- * Enforces student uploads, role-based retrieval, and admin verification status updates.
- */
+// THIS MODULE HANDLES DOCUMENT UPLOAD, RETRIEVAL, VERIFICATION AND DELETION
 
 const Document = require('../models/document');
 const Application = require('../models/application');
-const Institution = require('../models/institution');
 const User = require('../models/user');
 const { triggerNotification } = require('../services/notificationServices');
+const { resolveTenantFromSubdomain } = require('../middleware/tenantResolverMiddleware');
 
-/**
- * @function resolveTenantFromSubdomain
- * @description Extracts the host header from the request, parses the subdomain, 
- * and queries the database for the corresponding Institution tenant ID.
- * Falls back to DEFAULT_TENANT_ID in localhost/development environments.
- * 
- * @param {Object} req - Express request object.
- * @returns {Promise<mongoose.Types.ObjectId|null>} Resolves to the tenant's ObjectId or null if invalid.
- */
-const resolveTenantFromSubdomain = async (req) => {
-    const host = req.headers.host;
-    if (!host) {
-        return null;
-    }
-
-   const hostname = host.split(':')[0];
-   const subdomain = hostname.split('.')[0];
-    if (subdomain === 'localhost' || subdomain === '127.0.0.1' || subdomain === 'www') {
-        if (process.env.DEFAULT_TENANT_ID) {
-            return process.env.DEFAULT_TENANT_ID;
-        }
-        return null;
-    }
-
-    const institution = await Institution.findOne({ subdomain }).select('_id');
-    if (!institution) {
-        return null;
-    }
-    return institution._id;
-};
-
-/**
- * @route POST /api/documents/upload
- * @description Student uploads a single file. File upload validation (Multer) runs as route middleware.
- * Connects the document record to the correct tenant and appends its reference to the applicant's course application.
- * Only allowed if the application status is in 'pending' or 'draft' state.
- */
+// UPLOAD A DOCUMENT FOR A STUDENT'S APPLICATION - STUDENT ONLY
 const uploadDocument = async (req, res) => {
     try {
+        // CHECK IF FILE WAS UPLOADED
         if (!req.file) {
             return res.status(400).json({ 
                 success: false, 
@@ -56,6 +17,7 @@ const uploadDocument = async (req, res) => {
             });
         }
 
+        // VALIDATE REQUIRED FIELDS
         const { name, type, applicationId } = req.body;
         if (!name || !type || !applicationId) {
             return res.status(400).json({ 
@@ -64,7 +26,7 @@ const uploadDocument = async (req, res) => {
             });
         }
 
-        // Resolve the tenant context
+        // RESOLVE TENANT
         const tenantId = req.user.tenantId || await resolveTenantFromSubdomain(req);
         if (!tenantId) {
             return res.status(400).json({ 
@@ -73,7 +35,7 @@ const uploadDocument = async (req, res) => {
             });
         }
 
-        // Verify that the target application exists and belongs to the authenticated applicant
+        // VERIFY APPLICATION EXISTS AND BELONGS TO THIS STUDENT
         const application = await Application.findOne({
             _id: applicationId,
             tenantId,
@@ -87,7 +49,7 @@ const uploadDocument = async (req, res) => {
             });
         }
 
-        // Lock edits if the application status has progressed past the draft/pending review phase
+        // ALLOW DOCUMENT UPLOAD FOR DRAFT APPLICATIONS ONLY
         if (application.status !== 'draft') {
             return res.status(400).json({ 
                 success: false, 
@@ -95,18 +57,18 @@ const uploadDocument = async (req, res) => {
             });
         }
 
-        // Save document metadata and upload URL path in database
+        // CREATE DOCUMENT RECORD IN DATABASE
         const document = await Document.create({
             name,
             type,
             fileUrl: `/uploads/documents/${req.file.filename}`,
-            status: 'pending',
-            studentId: req.user.id,
+            status: 'under review',
+            applicantId: req.user.id,
             applicationId,
             tenantId
         });
 
-        // Append document ID reference to the Application model document registry
+        // APPEND DOCUMENT REFERENCE TO APPLICATION
         application.documents = application.documents || [];
         application.documents.push(document._id);
         await application.save();
@@ -124,12 +86,7 @@ const uploadDocument = async (req, res) => {
     }
 };
 
-/**
- * @route GET /api/documents/:applicationId
- * @description Retrieves all uploaded documents associated with a specific application.
- * Students can only fetch documents belonging to their own applications.
- * Institution/Super Admins can fetch any documents belonging to applications within their tenant.
- */
+// GET ALL DOCUMENTS FOR A SPECIFIC APPLICATION
 const getDocuments = async (req, res) => {
     try {
         const tenantId = req.user.tenantId || await resolveTenantFromSubdomain(req);
@@ -142,7 +99,7 @@ const getDocuments = async (req, res) => {
 
         const { applicationId } = req.params;
 
-        // Enforce access control filter: students can only fetch their own files
+        // ENFORCE ACCESS CONTROL - STUDENT CAN VIEW ONLY THIER DOCUMENTS
         if (req.user.role === 'student') {
             const application = await Application.findOne({
                 _id: applicationId,
@@ -160,7 +117,7 @@ const getDocuments = async (req, res) => {
             const documents = await Document.find({
                 applicationId,
                 tenantId,
-                studentId: req.user.id
+                applicantId: req.user.id
             })
                 .populate('reviewedBy', 'name email')
                 .sort({ createdAt: -1 });
@@ -172,6 +129,7 @@ const getDocuments = async (req, res) => {
             });
         }
 
+        // ADMIN CAN FETCH ALL DOCUMENTS FOR THE APPLICATIONS
         const documents = await Document.find({ applicationId, tenantId })
             .populate('reviewedBy', 'name email')
             .sort({ createdAt: -1 });
@@ -182,6 +140,12 @@ const getDocuments = async (req, res) => {
             data: documents
         });
     } catch (err) {
+         if (err.name === 'CastError' || err.kind === 'ObjectId') {
+            return res.status(404).json({
+                success: false,
+                message: 'Application not found'
+            });
+        }
         res.status(500).json({ 
             success: false, 
             message: err.message 
@@ -189,7 +153,7 @@ const getDocuments = async (req, res) => {
     }
 };
 
-// GET SINGLE DOCUMENT BY ID FUNCTION - FOR BOTH STUDENT AND INSTITUTION ADMIN
+// GET A SINGLE DOCUMENT BY ID - FOR BOTH STUDENT AND INSTITUTION ADMIN
 const getDocumentById = async (req, res) => {
     try {
         const tenantId = req.user.tenantId || await resolveTenantFromSubdomain(req);
@@ -202,11 +166,12 @@ const getDocumentById = async (req, res) => {
 
         const { id } = req.params;
 
+        // STUDENT CAN ONLY VIEW THEIR OWN DOCUMENTS
         if (req.user.role === 'student') {
             const document = await Document.findOne({
                 _id: id,
                 tenantId,
-                studentId: req.user.id
+                applicantId: req.user.id
             }).populate('reviewedBy', 'name email');
 
             if (!document) {
@@ -222,6 +187,7 @@ const getDocumentById = async (req, res) => {
             });
         }
 
+        // ADMIN FETCH ANY DOCUMENT IN TENANT
         const document = await Document.findOne({ _id: id, tenantId})
             .populate('reviewedBy', 'name email');
 
@@ -237,6 +203,12 @@ const getDocumentById = async (req, res) => {
             data: document
         });
     } catch (err) {
+         if (err.name === 'CastError' || err.kind === 'ObjectId') {
+            return res.status(404).json({
+                success: false,
+                message: 'Document not found'
+            });
+        }
         res.status(500).json({
             success: false,
             message: err.message
@@ -244,11 +216,7 @@ const getDocumentById = async (req, res) => {
     }
 };
 
-/**
- * @route PUT /api/documents/:id/status
- * @description Admin approves or rejects a specific document and attaches comments.
- * Automatically triggers the Document Rejection alert (in-app + email) if state shifts to 'rejected'.
- */
+// UPDATE DOCUMENT VERIFICATION STATUS - ADMIN ONLY
 const updateDocumentStatus = async (req, res) => {
     try {
         const tenantId = req.user.tenantId;
@@ -268,7 +236,7 @@ const updateDocumentStatus = async (req, res) => {
             });
         }
 
-        // Retrieve document belonging strictly to the admin's tenant
+        // RETRIEVE DOCUMENT BELONGING STRICTLY TO THE ADMIN'S TENANT
         const document = await Document.findOne({ _id: req.params.id, tenantId });
         if (!document) {
             return res.status(404).json({ 
@@ -278,6 +246,8 @@ const updateDocumentStatus = async (req, res) => {
         }
 
         const oldStatus = document.status;
+
+        // UPDATE DOCUMENT STATUS 
         document.status = status;
         document.remarks = remarks || '';
         document.reviewedBy = req.user.id;
@@ -285,18 +255,52 @@ const updateDocumentStatus = async (req, res) => {
 
         await document.save();
 
+        const studentUser = await User.findById(document.applicantId);
+
         // DOCUMENT REJECTION TRIGGER
         if (oldStatus !== status && status === 'rejected') {
-            const studentUser = await User.findById(document.studentId);
             if (studentUser) {
                 await triggerNotification({
-                    recipient: document.studentId,
+                    userId: document.applicantId,
+                    tenantId: tenantId,
+                    type: 'document_rejected',
+                    title: 'Document Rejected',
                     message: `Your uploaded document "${document.name}" was rejected. Remarks: ${remarks || 'None'}`,
-                    type: 'document_rejection',
-                    tenantId,
                     email: studentUser.email,
                     emailSubject: `Document Rejected: ${document.name}`,
-                    emailMessage: `Hi ${studentUser.name},\n\nYour uploaded document "${document.name}" has been rejected during verification.\n\nRemarks: ${remarks || 'None'}\n\nPlease log in to your dashboard and upload a valid replacement file.\n\nBest regards,\nAdmissions Verification Team`
+                    emailMessage: `Hi ${studentUser.name},\n\nYour uploaded document "${document.name}" has been rejected during verification.\n\nRemarks: ${remarks || 'None'}\n\nPlease log in to your dashboard and upload a valid replacement file.\n\nBest regards,\nAdmissions Verification Team`,
+                    metadata: {
+                        documentId: document._id,
+                        documentName: document.name,
+                        documentType: document.type,
+                        applicationId: document.applicationId
+                    },
+                    sourceId: document._id,
+                    sourceModel: 'Document'
+                });
+            }
+        }
+
+        // DOCUMENT APPROVED TRIGGER
+        if (oldStatus !== status && status === 'approved') {
+            if (studentUser) {
+                await triggerNotification({
+                    userId: document.applicantId,
+                    tenantId: tenantId,
+                    type: 'document_approved',
+                    title: 'Document Approved',
+                    message: `Your uploaded document "${document.name}" has been approved.`,
+                    email: studentUser.email,
+                    emailSubject: `Document Approved: ${document.name}`,
+                    emailMessage: `Hi ${studentUser.name},\n\nYour uploaded document "${document.name}" has been verified and approved.\n\nContinue with your application process.\n\nBest regards,\nAdmissions Verification Team`,
+                    metadata: {
+                        documentId: document._id,
+                        documentName: document.name,
+                        documentType: document.type,
+                        applicationId: document.applicationId
+                    },
+                    sourceId: document._id,
+                    sourceModel: 'Document'
                 });
             }
         }
@@ -307,6 +311,12 @@ const updateDocumentStatus = async (req, res) => {
             data: document 
         });
     } catch (err) {
+        if (err.name === 'CastError' || err.kind === 'ObjectId') {
+            return res.status(404).json({
+                success: false,
+                message: 'Document not found'
+            });
+        }
         res.status(500).json({ 
             success: false, 
             message: err.message 
@@ -325,6 +335,7 @@ const deleteDocument = async (req, res) => {
             });
         }
 
+        // FIND AND DELETE DOCUMENT 
         const document = await Document.findOneAndDelete({
             _id: req.params.id,
             tenantId
@@ -336,6 +347,7 @@ const deleteDocument = async (req, res) => {
             });
         }
 
+        // REMOVE DOCUMENT REFERENCE FROM APPLICATION
         if (document.applicationId) {
             await Application.findByIdAndUpdate(document.applicationId, {
                 $pull: { documents: document._id }
@@ -347,6 +359,12 @@ const deleteDocument = async (req, res) => {
             message: 'Document deleted successfully'
         });
     } catch (err) {
+        if (err.name === 'CastError' || err.kind === 'ObjectId') {
+            return res.status(404).json({
+                success: false,
+                message: 'Document not found'
+            });
+        }
         res.status(500).json({
             success: false,
             message: err.message

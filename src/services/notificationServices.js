@@ -1,12 +1,13 @@
+// NOTIFICATION SERVICE 
+// CENTRAL SERVICE FOR TRIGGERING NOTIFICATIONS ACROSS ALL EVENT TYPES
+// HANDLES BOTH IN-APP NOTIFICATIONS AND EMAIL NOTIFICATIONS
+
 const Notification = require('../models/notification');
 const { sendEmail } = require('./emailService');
 
-/**
- * Centrally triggers student notifications across all event types.
- * Saves an in-app notification in MongoDB and sends an email.
- */
-
+// TYPE MAPPING - MAPS INPUT EVENT TYPES TO NOTIFICATION MODEL ENUM VALUES
 const TYPE_MAPPING = {
+
     // REGISTRATION
     registration: 'registration_success',
     registration_success: 'registration_success',
@@ -34,6 +35,7 @@ const TYPE_MAPPING = {
     admission_rejection: 'admission_rejected'
 };
 
+// GET TITLE FOR NOTIFICATION - USED AS FALLBACK WHEN NO CUSTOM TITLE IS PROVIDED
 const getTitleForType = (type) => {
     const titles = {
         registration_success: 'Registration Successful',
@@ -48,6 +50,7 @@ const getTitleForType = (type) => {
     return titles[type] || 'ScholarStack Update';
 };
 
+// TRIGGER NOTIFICATION FUNCTION - CREATES IN-APP NOTIFICATION AND SENDS EMAIL IF PROVIDED
 const triggerNotification = async ({
     userId,
     tenantId,
@@ -62,14 +65,17 @@ const triggerNotification = async ({
     sourceModel = null
 }) => {
     try {
+        // VALIDATE REQUIRED FIELDS
         if(!userId) { throw new Error('userId is required for notification'); }
         if(!tenantId) { throw new Error('tenantId is required for notification'); }
         if(!type) { throw new Error('notification type is required'); }
         if(!message) { throw new Error('notification message is required'); }
 
+        // MAP TYPE AND GENERATE TITLE
         let mappedType = TYPE_MAPPING[type] || 'status_updated';
         const notificationTitle = title || getTitleForType(mappedType);
 
+        // CREATE IN-APP NOTIFICATION
         const notification = await Notification.create({
             userId,
             tenantId,
@@ -83,6 +89,7 @@ const triggerNotification = async ({
             sourceModel
         });
 
+        // SEND EMAIL
         let emailSent = false;
         if(email && emailMessage) {
             try {

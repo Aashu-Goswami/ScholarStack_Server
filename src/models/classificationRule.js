@@ -1,3 +1,5 @@
+// CLASSIFICATION RULES MODEL
+
 const mongoose = require('mongoose');
 
 const ClassificationRuleSchema = new mongoose.Schema(
@@ -5,7 +7,7 @@ const ClassificationRuleSchema = new mongoose.Schema(
     tenantId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Institution',
-      required: true,
+      required: [true, 'Tenant Id is  required'],
       unique: true
     },
     highMeritThreshold: {

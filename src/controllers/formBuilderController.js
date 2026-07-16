@@ -1,31 +1,10 @@
+// THIS MODULE HANDLES DYNAMIC FORM TEMPLATE MANAGEMENT FOR COURSES
+
 const FormTemplate = require('../models/formTemplate');
 const Course = require('../models/course');
-const Institution = require('../models/institution');
+const { resolveTenantFromSubdomain } = require('../middleware/tenantResolverMiddleware');
 
-// HELPER FUNCTION - TO RESOLVE TENANT FROM SUBDOMAIN
-const resolveTenantFromSubdomain = async (req, res) => {
-    const host = req.headers.host;
-    if(!host) {
-        return null;
-    }
-
-    const hostname = host.split(':')[0];
-    const subdomain = hostname.split('.')[0];
-    if(subdomain === 'localhost' || subdomain === '127.0.0.1' || subdomain === 'www') {
-        if(process.env.DEFAULT_TENANT_ID) {
-            return process.env.DEFAULT_TENANT_ID;
-        }
-        return null;
-    }
-
-    const institution = await Institution.findOne({ subdomain }).select('_id');
-    if(!institution) {
-        return null;
-    }
-    return institution._id;
-}
-
-// GET FORM TEMPLATE BY COURSE FUNCTION - FOR STUDENT 
+// GET LATEST FORM TEMPLATE FOR A SPECIFIC COURSE - FOR STUDENT 
 const getFormTemplateByCourse = async (req, res) => {
     try {
         const { courseId } = req.params;
@@ -38,6 +17,7 @@ const getFormTemplateByCourse = async (req, res) => {
             });
         }
 
+        // VERIFY COURSE EXISTS AND BELONGS TO THIS TENANT 
         const course = await Course.findOne({ _id : courseId, tenantId });
         if(!course) {
             return res.status(404).json({
@@ -46,6 +26,7 @@ const getFormTemplateByCourse = async (req, res) => {
             });
         }
 
+        // GET THE LATEST TEMPLATE FOR THIS COURSE 
         const template = await FormTemplate.findOne({ courseId, tenantId }).sort({ createdAt : -1 });
         if(!template) {
             return res.status(404).json({
@@ -59,6 +40,12 @@ const getFormTemplateByCourse = async (req, res) => {
             data : template
         });
     } catch (err) {
+        if (err.name === 'CastError' || err.kind === 'ObjectId') {
+            return res.status(404).json({
+                success: false,
+                message: 'Course not found'
+            });
+        }
         res.status(500).json({
             success : false,
             message : err.message
@@ -66,7 +53,7 @@ const getFormTemplateByCourse = async (req, res) => {
     }
 };
 
-// CREATE OR SAVE FORM TEMPLATE FOR A COURSE - ONLY INSTITUTION ADMIN
+// CREATE A NEW FORM TEMPLATE FOR A COURSE - ONLY INSTITUTION ADMIN
 const createFormTemplate = async (req, res) => {
     try {
         const tenantId = req.user.tenantId;
@@ -79,6 +66,7 @@ const createFormTemplate = async (req, res) => {
 
         const { courseId, session, fields } = req.body;
 
+        // VALIDATE REQUIRED FIELDS
         if(!courseId || !fields || !Array.isArray(fields) || fields.length === 0) {
             return res.status(400).json({
                 success : false,
@@ -127,6 +115,7 @@ const createFormTemplate = async (req, res) => {
             }
         }
 
+        // AUTO-GENERATE SESSION IF NOT PROVIDED
         const sessionValue = session || new Date().getFullYear() + '-' + (new Date().getFullYear() + 1);
 
         // CREATE NEW FORM TEMPLATE
@@ -193,7 +182,7 @@ const getFormTemplateById = async (req, res) => {
         const template = await FormTemplate.findOne({
             _id : req.params.id,
             tenantId
-        }).populate('courseId', 'name');
+        }).populate('courseId', 'name session');
 
         if(!template) {
             return res.status(404).json({
@@ -207,6 +196,12 @@ const getFormTemplateById = async (req, res) => {
             data : template
         });
     } catch (err) {
+        if (err.name === 'CastError' || err.kind === 'ObjectId') {
+            return res.status(404).json({
+                success: false,
+                message: 'Form template not found'
+            });
+        }
         res.status(500).json({
             success : false,
             message : err.message
@@ -225,6 +220,7 @@ const updateFormTemplate = async (req, res) => {
             });
         }
 
+        // FIND TEMPLATE WITHIN TENANT
         const formTemplate = await FormTemplate.findOne({ _id : req.params.id, tenantId });
         if(!formTemplate) {
             return res.status(404).json({
@@ -268,6 +264,7 @@ const updateFormTemplate = async (req, res) => {
             formTemplate.fields = fields;
         }
 
+        // UPDATE ACTIVE STATUS IF PROVIDED
         if(typeof isActive === 'boolean') formTemplate.isActive = isActive;
 
         await formTemplate.save();
@@ -278,6 +275,12 @@ const updateFormTemplate = async (req, res) => {
             data : formTemplate
         });
     } catch (err) {
+        if (err.name === 'CastError' || err.kind === 'ObjectId') {
+            return res.status(404).json({
+                success: false,
+                message: 'Form template not found'
+            });
+        }
         res.status(500).json({
             success : false,
             message : err.message
@@ -296,6 +299,7 @@ const deleteFormTemplate = async (req, res) => {
             });
         }
 
+        // FIND AND DELETE TEMPLATE
         const formTemplate = await FormTemplate.findOneAndDelete({ _id : req.params.id, tenantId });
         if(!formTemplate) {
             return res.status(404).json({
@@ -309,6 +313,12 @@ const deleteFormTemplate = async (req, res) => {
             message : 'Form template deleted successfully'
         });
     } catch (err) {
+        if (err.name === 'CastError' || err.kind === 'ObjectId') {
+            return res.status(404).json({
+                success: false,
+                message: 'Form template not found'
+            });
+        }
         res.status(500).json({
             success : false,
             message : err.message

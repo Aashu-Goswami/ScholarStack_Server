@@ -27,7 +27,7 @@ router.post('/', protect, studentOnly, submitApplication);
 router.put('/:id/draft', protect, studentOnly, saveDraft);
 router.get('/my', protect, studentOnly, getMyApplication);
 
-// PUBLIC ROUTES
+// SHARED ROUTES
 router.get('/:id/timeline', protect, getApplicationTimeline);
 router.get('/:id', protect, getApplicationById);
 router.delete('/:id', protect, instAdminOnly, deleteApplication);

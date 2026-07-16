@@ -1,3 +1,5 @@
+// DOCUMENT MODEL
+
 const mongoose = require('mongoose');
 
 const documentSchema = new mongoose.Schema(
@@ -6,7 +8,7 @@ const documentSchema = new mongoose.Schema(
             type : String,
             required : [true,'Please add a document name'],
             trim : true,
-            maxLength : [100, 'Document name cannot exceed 100 characters']
+            maxlength : [100, 'Document name cannot exceed 100 characters']
         },
         type : {
             type : String,
@@ -14,7 +16,7 @@ const documentSchema = new mongoose.Schema(
             trim : true,
             enum : {
                 values : ['marksheet', 'certificate', 'idProof', 'photo', 'other'],
-                message : 'Document type must be one of : marksheet, certificate, identityProof, passportPhoto, other'
+                message : 'Document type must be one of : marksheet, certificate, idProof, photo, other'
             },
             default : 'other'
         },
@@ -25,20 +27,20 @@ const documentSchema = new mongoose.Schema(
         },
         status : {
             type : String,
-            enum : ['pending', 'approved', 'rejected'],
-            default : 'pending',
+            enum : ['under review', 'approved', 'rejected'],
+            default : 'under review',
             required : true
         },
         remarks : {
             type : String,
             default : '',
             trim : true,
-            maxLength : [500, 'Remarks cannot exceed 500 characters']
+            maxLength : [250, 'Remarks cannot exceed 250 characters']
         },
-        studentId : {
+        applicantId : {
             type : mongoose.Schema.Types.ObjectId,
             ref : 'User',
-            required : [true, 'Document must be associated with a student']
+            required : [true, 'Document must be associated with an applicant']
         },
         applicationId : {
             type : mongoose.Schema.Types.ObjectId,
@@ -65,10 +67,20 @@ const documentSchema = new mongoose.Schema(
     }
 );
 
-// Index to quickly query documents by application
 documentSchema.index({ tenantId: 1, createdAt: -1 });
 documentSchema.index({ tenantId: 1, status: 1 });
 documentSchema.index({ applicationId: 1, tenantId: 1 });
-documentSchema.index({ studentId: 1, tenantId: 1 });
+documentSchema.index({ applicantId: 1, tenantId: 1 });
+
+documentSchema.pre('save', async function() {
+    if (this.isModified('reviewedBy')) {
+        if (this.reviewedBy) {
+            this.reviewedAt = new Date();
+        } else {
+            this.reviewedAt = null;
+        }
+    }
+});
+
 
 module.exports = mongoose.model('Document', documentSchema);

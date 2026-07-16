@@ -1,43 +1,16 @@
-/**
- * @file controllers/applicationController.js
- * @description Controller handling student admission application CRUD operations
- * and managing the validation state machine transitions .
- * Connects directly to the notification engine to generate automatic emails
- * and in-app alerts on submissions, verifications, and admission approvals/rejections.
- */
+// THIS MODULE HANDLES STUDENT ADMISSION APPLICATION CRUD OPERATIONS AND MANAGES THE VALIDATION WORKFLOW TRANSITIONS.
+// SUPPORTED STATUSES ARE: draft → submitted → under_review → verified → admitted / rejected
 
 const Application = require('../models/application');
 const Course = require('../models/course');
-const Institution = require('../models/institution');
 const FormTemplate = require('../models/formTemplate');
 const User = require('../models/user');
 const AuditLog = require('../models/auditLog');
+const { resolveTenantFromSubdomain } = require('../middleware/tenantResolverMiddleware');
+const { triggerNotification } = require('../services/notificationServices');
 
-
-// HELPER FUNCTION - RESOLVE TENANT ID FROM SUBDOMAIN
-const resolveTenantFromSubdomain = async (req) => {
-    const host = req.headers.host;
-    if (!host) {
-        return null;
-    }
-
-    // FOR THE DEVELOPMENT PHASE ONLY
-    const hostname = host.split(':')[0];
-    const subdomain = hostname.split('.')[0];
-    if (subdomain === 'localhost' || subdomain === '127.0.0.1' || subdomain === 'www') {
-        if (process.env.DEFAULT_TENANT_ID) {
-            return process.env.DEFAULT_TENANT_ID;
-        }
-        return null;
-    }
-
-    const institution = await Institution.findOne({ subdomain }).select('_id');
-    if (!institution) {
-        return null;
-    }
-    return institution._id;
-};
-
+// ALLOWED STATUS TRANSITIONS FOR THE ADMISSION WORKFLOW
+// EACH KEY IS THE CURRENT STATUS AND THE ARRAY REPRESENTS VALID NEXT STATUSES
 const STATUS_TRANSITIONS = {
     draft: ['submitted'],
     submitted: ['under_review', 'rejected'],
@@ -49,23 +22,28 @@ const STATUS_TRANSITIONS = {
 
 const VALID_STATUSES = ['draft', 'submitted', 'under_review', 'verified', 'admitted', 'rejected'];
 
+// GET APPLICATION TIMELINE - RETURNS AUDIT LOG ENTRIES IN CHRONOLOGICAL ORDER (OLDER FIRST)
 const getApplicationTimeline = async (req, res) => {
     try {
         const { id } = req.params;
         const user = req.user;
 
+        // BUILD FILTER BASED ON USER ROLE 
         const filter = { _id : id };
 
+        // STUDENTS CAN ONLY VIEW THEIR OWN APPLICATIONS
         if(user.role === 'student') {
             filter.applicantId = user.id;
         }
 
+        // INSTITUTION ADMINS AND SUPER ADMINS CAN VIEW ALL APPLICATIONS WITHIN THEIR TENANT
         if(user.role === 'instAdmin' || user.role === 'superAdmin') {
             if(user.role === 'instAdmin') {
                 filter.tenantId = user.tenantId;
             }
         }
 
+        // VERIFY APPLICATION EXISTS AND USER HAS ACCESS
         const application = await Application.findOne(filter);
         if(!application) {
             return res.status(404).json({
@@ -74,6 +52,7 @@ const getApplicationTimeline = async (req, res) => {
             });
         }
 
+        // FETCH AUDIT LOG ENTRIES FOR THIS APPLICATION
         const timeline = await AuditLog.find({
             applicationId : id,
             tenantId : application.tenantId
@@ -94,8 +73,10 @@ const getApplicationTimeline = async (req, res) => {
     }
 };
 
+// GET WORKFLOW STATUSES AND TRANSITIONS - RETURNS ALL VALID STATUSES, THEIR LABEL
 const getWorkflowStatuses = async (req, res) => {
     try {
+        // DEFINE LABELS FOR EACH STATUS FOR FRONTEND DISPLAY PURPOSES
         const statusLabels = {
             draft: 'Draft',
             submitted: 'Submitted',
@@ -105,6 +86,7 @@ const getWorkflowStatuses = async (req, res) => {
             rejected: 'Rejected'
         };
 
+        // BUILD TRANSITIONS WITH LABELS FOR FRONTEND DISPLAY
         const transitions = {};
         for(const [from, toList] of Object.entries(STATUS_TRANSITIONS)) {
             transitions[from] = toList.map(to => ({
@@ -142,9 +124,10 @@ const getWorkflowStatuses = async (req, res) => {
     }
 };
 
-// CREATES A NEW APPLICATION - APPLICANT (PUBLIC/AUTHENTICATED USER)
+// SUBMIT A NEW APPLICATION - STUDENT ONLY FINAL SUBMISSION
 const submitApplication = async (req, res) => {
     try {
+        // RESOLVE TENANT FROM SUBDOMAIN
         const tenantId = await resolveTenantFromSubdomain(req);
         if (!tenantId) {
             return res.status(400).json({
@@ -155,6 +138,7 @@ const submitApplication = async (req, res) => {
 
         const { courseId, personalDetails, documents, session } = req.body;
 
+        // VALIDATE COURSE ID IS PROVIDED
         if (!courseId) {
             return res.status(400).json({
                 success : false,
@@ -162,7 +146,7 @@ const submitApplication = async (req, res) => {
             });
         }
 
-        // VERIFIES WETHER THE COURSE EXISTS UNDER THIS TENANT
+        // VERIFIES WHETHER THE COURSE EXISTS UNDER THIS TENANT
         const course = await Course.findOne({ _id: courseId, tenantId });
         if (!course) {
             return res.status(404).json({
@@ -171,7 +155,7 @@ const submitApplication = async (req, res) => {
             });
         }
 
-        // PREVENTS DUPLICATE APPLICATION FOR SAME COURSE BY SAME APPLICANT
+        // PREVENT DUPLICATE APPLICATION FOR SAME COURSE BY SAME APPLICANT
         const existingApplication = await Application.findOne({
             tenantId,
             courseId,
@@ -185,10 +169,12 @@ const submitApplication = async (req, res) => {
             });
         }
 
+        // VALIDATE REQUIRED FIELDS BASED ON THE FORM TEMPLATE
         const template = await FormTemplate.findOne({ courseId, tenantId }).sort({ createdAt : -1 });
         if(template) {
             for(let field of template.fields) {
-                if(field.required) {
+                const isRequired = field.validation && field.validation.required;
+                if(isRequired) {
                     const value = personalDetails ? personalDetails[field.fieldKey] : undefined;
                     if(value === undefined || value === null || value === '') {
                         return res.status(400).json({
@@ -200,6 +186,7 @@ const submitApplication = async (req, res) => {
             }
         }
 
+        // CREATE NEW APPLICATION RECORD WITH STATUS 'submitted' AND LOG THE ACTION IN AUDIT LOG
         const application = await Application.create({
             tenantId,
             courseId,
@@ -220,6 +207,24 @@ const submitApplication = async (req, res) => {
             remarks: 'Application submitted by student'
         });
 
+        // TRIGGER NOTIFICATION TO STUDENT AND SEND EMAIL
+        await triggerNotification({
+            userId: req.user.id,
+            tenantId: application.tenantId,
+            type: 'application_submitted',
+            title: 'Application Submitted',
+            message: `Your application for ${course.name} has been submitted successfully.`,
+            email: req.user.email,
+            emailSubject: `Application Submitted: ${course.name}`,
+            emailMessage: `Dear ${req.user.name},\n\nYour application for the course "${course.name}" has been submitted successfully. \n\nWe will review your application and notify you of the outcome.\n\nThank you for applying.\n\nBest regards,\n${course.name} Admissions Team`,
+            metadata: {
+                applicationId: application._id,
+                courseName: course.name
+            },
+            sourceId: application._id,
+            sourceModel: 'Application'
+        });
+
         res.status(201).json({
             success : true,
             message : 'Application submitted successfully',
@@ -233,9 +238,10 @@ const submitApplication = async (req, res) => {
     }
 };
 
-// SAVE DRAFT FUNCTION - FOR STUDENTS
+// SAVE DRAFT FUNCTION - FOR STUDENTS PARTIAL UPDATES
 const saveDraft = async (req, res) => {
     try {
+        // RESOLVE TENANT FROM SUBDOMAIN
         const tenantId = await resolveTenantFromSubdomain(req);
         if(!tenantId) {
             return res.status(400).json({
@@ -247,6 +253,7 @@ const saveDraft = async (req, res) => {
         const { id } = req.params;
         const { personalDetails, documents, session } = req.body;
 
+        // FIND THE APPLICATION - MUST BELONG TO THIS STUDENT AND TENANT
         const application = await Application.findOne({
             _id : id,
             tenantId,
@@ -259,6 +266,7 @@ const saveDraft = async (req, res) => {
             });
         }
 
+        // ONLY DRAFT APPLICATIONS CAN BE EDITED - ONCE SUBMITTED, NO FURTHER EDITS ALLOWED
         if(application.status !== 'draft') {
             return res.status(400).json({
                 success : false,
@@ -266,6 +274,7 @@ const saveDraft = async (req, res) => {
             });
         }
 
+        // UPDATE FIELDS 
         if(personalDetails) application.personalDetails = personalDetails;
         if(documents) application.documents = documents;
         if(session) application.session = session;
@@ -285,10 +294,12 @@ const saveDraft = async (req, res) => {
     }
 };
 
-// GET MY APPLICATION - ESPECIALLY FOR STUDENTS 
+// GET MY APPLICATION - GET ALL APPLICATIONS FOR THE LOGGED-IN STUDENT
 const getMyApplication = async (req, res) => {
     try {
         const user = req.user;
+
+        // ONLY STUDENTS CAN ACCESS 
         if(user.role !== 'student') {
             return res.status(403).json({
                 success : false,
@@ -296,6 +307,7 @@ const getMyApplication = async (req, res) => {
             });
         }
 
+        // FIND ALL APPLICATIONS FOR THIS STUDENT
         const applications = await Application.find({
             applicantId : user.id,
             tenantId : user.tenantId
@@ -316,7 +328,7 @@ const getMyApplication = async (req, res) => {
     }
 };
 
-// GETS ALL APPLICATIONS - INSTITUTION ADMIN (ALL), APPLICANT (OWN ONLY)
+// GETS ALL APPLICATIONS - RETURNS ALL APPLICATIONS FOR THE INSTITUTION ADMIN WITHIN THEIR TENANT
 const getAllApplications = async (req, res) => {
     try {
         const tenantId = req.user.tenantId;
@@ -327,6 +339,7 @@ const getAllApplications = async (req, res) => {
             });
         }
 
+        // FIND ALL APPLICATIONS FOR THIS TENANT
         const applications = await Application.find({ tenantId })
             .populate('applicantId', 'name email')
             .populate('courseId', 'name session')
@@ -345,7 +358,7 @@ const getAllApplications = async (req, res) => {
     }
 };
 
-// GETS SINGLE APPLICATION BY ID - WITHIN TENANT
+// GET A SINGLE APPLICATION BY ID - WITHIN TENANT AND ROLE CHECK
 const getApplicationById = async (req, res) => {
     try {
         const tenantId = await resolveTenantFromSubdomain(req);
@@ -358,7 +371,7 @@ const getApplicationById = async (req, res) => {
 
         const filter = { _id: req.params.id, tenantId };
 
-        // NON-ADMINS CAN ONLY VIEW THEIR OWN APPLICATION
+        // NON-ADMINS CAN ONLY VIEW THEIR OWN APPLICATIONS
         if (req.user.role !== 'instAdmin' && req.user.role !== 'superAdmin') {
             filter.applicantId = req.user.id;
         }
@@ -386,7 +399,7 @@ const getApplicationById = async (req, res) => {
     }
 };
 
-// UPDATES APPLICATION STATUS - ONLY INSTITUTION ADMIN, WITHIN TENANT
+// UPDATES APPLICATION STATUS - ONLY INSTITUTION ADMIN, WITHIN TENANT (ADMISSION WORKFLOW)
 const updateApplicationStatus = async (req, res) => {
     try {
         const tenantId = req.user.tenantId;
@@ -400,6 +413,7 @@ const updateApplicationStatus = async (req, res) => {
         const { id } = req.params;
         const { status, remarks } = req.body;
 
+        // VALIDATE STATUS 
         if (!status || !VALID_STATUSES.includes(status)) {
             return res.status(400).json({
                 success : false,
@@ -407,6 +421,7 @@ const updateApplicationStatus = async (req, res) => {
             });
         }
 
+        // FIND THE APPLICATION
         const application = await Application.findOne({ _id : id, tenantId });
         if (!application) {
             return res.status(404).json({
@@ -415,6 +430,7 @@ const updateApplicationStatus = async (req, res) => {
             });
         }
 
+        // VALIDATE TRANSITION
         const currentStatus = application.status;
         const allowedNext = STATUS_TRANSITIONS[currentStatus] || [];
 
@@ -425,6 +441,7 @@ const updateApplicationStatus = async (req, res) => {
             });
         }
 
+        // UPDATE THE STATUS
         application.status = status;
         if (remarks) application.remarks = remarks;
         application.reviewedBy = req.user.id;
@@ -432,6 +449,7 @@ const updateApplicationStatus = async (req, res) => {
 
         await application.save();
 
+        // LOG THE STATUS CHANGE IN AUDIT LOG
         await AuditLog.create({
             tenantId,
             applicationId: application._id,
@@ -439,6 +457,26 @@ const updateApplicationStatus = async (req, res) => {
             toStatus: status,
             changedBy: req.user.id,
             remarks: remarks || `Status changed from ${currentStatus} to ${status}`
+        });
+
+        // TRIGGER NOTIFICATION TO STUDENT
+        const studentUser = await User.findById(application.applicantId);
+        await triggerNotification({
+            userId: application.applicantId,
+            tenantId: application.tenantId,
+            type: 'status_updated',
+            title: 'Application Status Updated',
+            message: `Your application status has been updated to ${status}.`,
+            email: studentUser?.email,
+            emailSubject: `Application Status: ${status}`,
+            emailMessage: `Dear ${studentUser?.name},\n\nYour application status has been updated to "${status}".\n\nRemarks: ${remarks || 'No additional remarks provided.'}\n\nPlease log in to your account for more details.\n\nBest regards,\nAdmissions Team`,
+            metadata: {
+                applicationId: application._id,
+                oldStatus: currentStatus,
+                newStatus: status
+            },
+            sourceId: application._id,
+            sourceModel: 'Application'
         });
 
         res.status(200).json({
@@ -454,7 +492,7 @@ const updateApplicationStatus = async (req, res) => {
     }
 };
 
-// FILTER APPLICATIONS FUNCTION - FOR ADMIN DASHBOARD
+// FILTER APPLICATIONS FUNCTION - FILTERS APPLICATIONS WITH ADVANCED CRITERIA
 const filterApplications = async (req, res) => {
     try {
         const tenantId = req.user.tenantId;
@@ -468,6 +506,7 @@ const filterApplications = async (req, res) => {
         const { status, courseId, applicantId, dateFrom, dateTo } = req.query;
         const filter = { tenantId };
 
+        // APPLY FILTERS BASED ON QUERY PARAMETERS
         if(status) filter.status = status;
         if(courseId) filter.courseId = courseId;
         if(applicantId) filter.applicantId = applicantId;
@@ -495,7 +534,7 @@ const filterApplications = async (req, res) => {
     }
 };
 
-// DELETE APPLICATION - ADMIN ONLY
+// DELETE AN APPLICATION - ADMIN ONLY
 const deleteApplication = async (req, res) => {
     try {
         const tenantId = req.user.tenantId;
@@ -506,6 +545,7 @@ const deleteApplication = async (req, res) => {
             });
         }
 
+        // FIND AND DELETE THE APPLICATION
         const application = await Application.findOneAndDelete({
             _id : req.params.id,
             tenantId
@@ -517,6 +557,7 @@ const deleteApplication = async (req, res) => {
             });
         }
 
+        // DELETE ASSCIATED AUDIT LOGS
         await AuditLog.deleteMany({
             applicationId: application._id,
             tenantId

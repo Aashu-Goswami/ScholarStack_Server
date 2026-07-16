@@ -1,21 +1,11 @@
-/**
- * @file controllers/dashboardController.js
- * @description Controller implementing administrative and student dashboards for the ScholarStack portal (Module 10).
- * Computes multi-tenant KPI aggregations, Course-wise registration statistics for charts, 
- * and provides applicants with real-time status timelines, required document checklists, and alerts.
- */
-
+// THIS MODULE HANDLES DASHBOARD IMPLEMENTATION
+ 
 const Application = require('../models/application');
 const Course = require('../models/course');
 const Document = require('../models/document');
 const mongoose = require('mongoose');
 
-/**
- * @route GET /api/dashboard/admin
- * @description Retrieve KPI summary metrics, status-wise counts, and conversion rates for the logged-in admin's tenant.
- * @param {Object} req - Express request object.
- * @param {Object} res - Express response object.
- */
+// GET ADMIN DASHBOARD SUMMARY METRICS 
 const getAdminDashboard = async (req, res) => {
     try {
         const tenantId = req.user.tenantId;
@@ -26,7 +16,7 @@ const getAdminDashboard = async (req, res) => {
             });
         }
 
-        // Count totals grouped by status using aggregation
+        // COUNT APPLICATIONS GROUPED BY STATUS USING AGGREGRATION
         const counts = await Application.aggregate([
             { $match: { tenantId: new mongoose.Types.ObjectId(tenantId) } },
             {
@@ -37,6 +27,7 @@ const getAdminDashboard = async (req, res) => {
             }
         ]);
 
+        // INITIALIZE ALL STATUS COUNTS
         const statusCounts = {
             draft: 0,
             submitted: 0,
@@ -54,14 +45,13 @@ const getAdminDashboard = async (req, res) => {
             total += item.count;
         });
 
-        // Compute summary aggregates
-        const under_review = statusCounts.submitted + statusCounts.under_review;
+        // COMPUTE SUMMARY AGGREGRATES WITH CLEAR NAMING
+        const pending = statusCounts.draft + statusCounts.submitted + statusCounts.under_review;
         const approved = statusCounts.admitted;
         const rejected = statusCounts.rejected;
         const verified = statusCounts.verified;
-        const draft = statusCounts.draft;
 
-        // Compute Admission Statistics (Module 10 - Admission Statistics)
+        // COMPUTE CONVERSION AND REJECTION RATES
         const conversionRate = total > 0 ? ((approved / total) * 100).toFixed(2) : "0.00";
         const rejectionRate = total > 0 ? ((rejected / total) * 100).toFixed(2) : "0.00";
 
@@ -70,11 +60,10 @@ const getAdminDashboard = async (req, res) => {
             data: {
                 summary: {
                     totalApplications: total,         
-                    under_reviewApplications: under_review,     
+                    pendingApplications: pending,     
                     approvedApplications: approved,   
                     rejectedApplications: rejected,   
                     verifiedApplications: verified,
-                    draftApplications: draft,
                     admissionStatistics: {           
                         conversionRatePercent: parseFloat(conversionRate),
                         rejectionRatePercent: parseFloat(rejectionRate)
@@ -91,12 +80,7 @@ const getAdminDashboard = async (req, res) => {
     }
 };
 
-/**
- * @route GET /api/dashboard/admin/stats/by-course
- * @description Retrieve registration statistics and applications grouped by course, structured for frontend chart components (e.g. Recharts).
- * @param {Object} req - Express request object.
- * @param {Object} res - Express response object.
- */
+// GET COURSE-WISE REGISTRATION STATISTICS FOR CHARTS
 const getStatsByCourse = async (req, res) => {
     try {
         const tenantId = req.user.tenantId;
@@ -107,10 +91,10 @@ const getStatsByCourse = async (req, res) => {
             });
         }
 
-        // Fetch all courses for the tenant to ensure courses with 0 applications are represented
+        // FETCH ALL COURSES FOR THE TENANT - INCLUDING THOSE WITH 0 APPLICATIONS
         const courses = await Course.find({ tenantId });
 
-        // Retrieve aggregated stats grouped by courseId (Module 10 - Applications by Course)
+        // AGGREAGTE APPLICATION COUNTS GROUPED BY COURSEID
         const appStats = await Application.aggregate([
             { $match: { tenantId: new mongoose.Types.ObjectId(tenantId) } },
             {
@@ -118,14 +102,14 @@ const getStatsByCourse = async (req, res) => {
                     _id: '$courseId',
                     total: { $sum: 1 },
                     admitted: { $sum: { $cond: [{ $eq: ['$status', 'admitted'] }, 1, 0] } },
-                    under_review: { $sum: { $cond: [{ $in: ['$status', ['submitted', 'under_review']] }, 1, 0] } },
+                    pending: { $sum: { $cond: [{ $in: ['$status', ['draft', 'submitted', 'under_review']] }, 1, 0] } },
                     rejected: { $sum: { $cond: [{ $eq: ['$status', 'rejected'] }, 1, 0] } },
                     verified: { $sum: { $cond: [{ $eq: ['$status', 'verified'] }, 1, 0] } },
-                    draft: { $sum: { $cond: [{ $eq: ['$status', 'draft'] }, 1, 0] } }
                 }
             }
         ]);
 
+        // BUILD A MAP FOR QUICK LOOKUP
         const statsMap = {};
         appStats.forEach(stat => {
             if (stat._id) {
@@ -133,25 +117,23 @@ const getStatsByCourse = async (req, res) => {
             }
         });
 
-        // Map courses with their corresponding counts
+        // MAP COURSES WITH THEIR STATS 
         const courseData = courses.map(course => {
             const stats = statsMap[course._id.toString()] || {
                 total: 0,
                 admitted: 0,
-                under_review: 0,
+                pending: 0,
                 rejected: 0,
                 verified: 0,
-                draft: 0
             };
             return {
                 courseId: course._id,
                 courseName: course.name,
                 totalApplications: stats.total,
                 admittedApplications: stats.admitted,
-                under_reviewApplications: stats.under_review,
+                pendingApplications: stats.pending,
                 rejectedApplications: stats.rejected,
-                verifiedApplications: stats.verified,
-                draftApplications: stats.draft
+                verifiedApplications: stats.verified
             };
         });
 
@@ -167,30 +149,27 @@ const getStatsByCourse = async (req, res) => {
     }
 };
 
-/**
- * @route GET /api/dashboard/student
- * @description Retrieve the application progress, missing required documents, and verification milestones/status timeline for the applicant.
- * @param {Object} req - Express request object.
- * @param {Object} res - Express response object.
- */
+// GET STUDENT APPLICATION'S DASHBOARD
 const getStudentDashboard = async (req, res) => {
     try {
         const studentId = req.user.id;
 
-        // Find all applications submitted by the logged-in student, populating course info
+        // FIND ALL APPLICATIONS FOR THE STUDENT WITH POPULATED COURSE INFO
         const applications = await Application.find({ applicantId: studentId })
             .populate('courseId', 'name requiredDocuments session')
             .sort({ updatedAt: -1 });
 
         const dashboardData = [];
 
+        // PROCESS EACH APPLICATION
         for (const app of applications) {
             const course = app.courseId;
             const requiredDocTypes = (course && course.requiredDocuments) ? course.requiredDocuments : [];
 
-            // Find all uploaded documents for this application
+            // FIND ALL DOCUMENTS FOR THIS APPLICATION
             const uploadedDocs = await Document.find({ applicationId: app._id });
 
+            // DETERMINE MISSING AND REJECTED DOCUMENTS
             const uploadedTypes = uploadedDocs.map(doc => doc.type);
             const missingDocs = requiredDocTypes.filter(type => !uploadedTypes.includes(type));
             const rejectedDocs = uploadedDocs.filter(doc => doc.status === 'rejected').map(doc => ({
@@ -201,9 +180,14 @@ const getStudentDashboard = async (req, res) => {
             }));
             const reviewedAt = app.reviewedAt || app.updatedAt || null;
 
-            // Construct dynamic status timeline based on application status (Module 10 - Status Timeline)
+            // CONSTRUCT STATUS TIMELINE 
             const timelineSteps = [
-                { step: 'Created', label: 'Application Created', status: 'completed', date: app.createdAt },
+                { 
+                    step: 'Created', 
+                    label: 'Application Created', 
+                    status: 'completed', 
+                    date: app.createdAt 
+                },
                 { 
                     step: 'Submitted', 
                     label: 'Application Submitted', 
@@ -236,6 +220,7 @@ const getStudentDashboard = async (req, res) => {
                 }
             ];
 
+            // BUILD DASHBOARD ENTRY FOR THIS APPLICATION
             dashboardData.push({
                 applicationId: app._id,
                 course: {

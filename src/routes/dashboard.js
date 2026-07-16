@@ -12,7 +12,7 @@ const { instAdminOnly, studentOnly } = require('../middleware/roleCheckerMiddlew
 router.get('/admin', protect, instAdminOnly, getAdminDashboard);
 router.get('/admin/stats/by-course', protect, instAdminOnly, getStatsByCourse);
 
-// STUDENT-ROUTES
+// STUDENT ROUTES
 router.get('/student', protect, studentOnly, getStudentDashboard);
 
 module.exports = router;

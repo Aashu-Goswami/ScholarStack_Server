@@ -1,3 +1,5 @@
+// APPLICATION MODEL
+
 const mongoose = require('mongoose');
 
 const applicationSchema = new mongoose.Schema(
@@ -49,7 +51,8 @@ const applicationSchema = new mongoose.Schema(
         remarks: {
             type: String,
             default: '',
-            trim : true
+            trim : true,
+            maxlength : [250, 'Remarks cannot exceed 250 characters']
         },
         reviewedBy: {
             type: mongoose.Schema.Types.ObjectId,
@@ -69,10 +72,24 @@ const applicationSchema = new mongoose.Schema(
 applicationSchema.index({ tenantId : 1, createdAt : -1 });
 applicationSchema.index({ tenantId : 1, status : 1 });
 applicationSchema.index({ tenantId : 1, courseId : 1 });
-applicationSchema.index({ tenantId : 1, applicationId : 1 });
+applicationSchema.index({ tenantId : 1, applicantId : 1 });
 
 applicationSchema.index({ applicantId: 1, tenantId: 1, createdAt: -1 });
 applicationSchema.index({ tenantId: 1, courseId: 1, applicantId: 1 }, { unique: false });
 applicationSchema.index({ createdAt: 1 });
+
+applicationSchema.pre('save', async function() {
+    if (this.isModified('status')) {
+        if (this.status === 'submitted' && !this.submittedAt) {
+            this.submittedAt = new Date();
+        }
+        if (this.status === 'draft') {
+            this.submittedAt = null;
+        }
+    }
+    if (this.isModified('reviewedBy') && this.reviewedBy) {
+        this.reviewedAt = new Date();
+    }
+});
 
 module.exports = mongoose.model('Application', applicationSchema);

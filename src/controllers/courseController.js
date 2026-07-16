@@ -1,33 +1,7 @@
-const Course=require('../models/course');
-const Institution=require('../models/institution');
+// THIS MODULE HANDLES CRUD OPERATIONS FOR COURSES WITHIN AN INSTITUTION
 
-// HELPER FUNCTION - RESOLVE TENANT ID FROM SUBDOMAIN
-const resolveTenantFromSubdomain = async (req) => {
-    const host = req.headers.host;
-    if (!host) {
-        return null;
-    }
-    
-    const hostname = host.split(':')[0];
-    if (!hostname) {
-        return null;
-    }
-
-    // FOR THE DEVELOPMENT PHASE ONLY
-   const subdomain = hostname.split('.')[0];
-    if(subdomain === 'localhost'|| subdomain === '127.0.0.1'|| subdomain === 'www') {
-        if(process.env.DEFAULT_TENANT_ID) {
-            return process.env.DEFAULT_TENANT_ID;
-        }
-        return null;
-    }
-
-    const institution = await Institution.findOne({ subdomain }).select('_id');
-    if(!institution) {
-        return null;
-    }
-    return institution._id;
-};
+const Course = require('../models/course');
+const { resolveTenantFromSubdomain } = require('../middleware/tenantResolverMiddleware');
 
 // CREATE A NEW COURSE - ONLY INSTITUTION ADMIN
 const createCourse = async (req, res) => {
@@ -42,6 +16,7 @@ const createCourse = async (req, res) => {
 
         const {name, eligibilityCriteria, admissionCapacity, requiredDocuments, session, description } = req.body;
 
+        // VALIDATE REQUIRED FIELDS 
         if (!name) {
             return res.status(400).json({
                 success : false,
@@ -83,7 +58,7 @@ const createCourse = async (req, res) => {
     }
 };
 
-// GET ALL COURSES FOR THE CURRENT TENANT
+// GET ALL COURSES FOR THE CURRENT INSTITUTION
 const getCourses = async (req, res) => {
     try {
         const tenantId = await resolveTenantFromSubdomain(req);
@@ -133,6 +108,12 @@ const getCourseById = async (req, res) => {
             data : course
         });
     } catch (err) {
+         if (err.name === 'CastError' || err.kind === 'ObjectId') {
+            return res.status(404).json({
+                success: false,
+                message: 'Course not found'
+            });
+        }
         res.status(500).json({
             success : false,
             message : err.message
@@ -151,6 +132,7 @@ const updateCourse = async (req, res) => {
             });
         }
 
+        // FIND COURSE - MUST BELONG TO THIS TENANT
         const course = await Course.findOne({ _id: req.params.id, tenantId: tenantId });
         if (!course) {
             return res.status(404).json({
@@ -159,10 +141,13 @@ const updateCourse = async (req, res) => {
             });
         }
 
+        // STORE ORIGINAL NAME BEFORE ANY MODIFICATIONS
         const originalName = course.name;
 
+        // EXTRACT UPDATABLE FIELDS
         const { name, description, eligibilityCriteria, admissionCapacity, requiredDocuments, session } = req.body;
 
+        // UPDATE PROVIDED FIELDS
         if (name) course.name = name;
         if (description) course.description = description;
         if (eligibilityCriteria) course.eligibilityCriteria = eligibilityCriteria;
@@ -170,6 +155,7 @@ const updateCourse = async (req, res) => {
         if (requiredDocuments) course.requiredDocuments = requiredDocuments;
         if (session) course.session = session;
 
+        // CHECK UNIQUENESS IF NAME IS BEING CHANGED
         if(name && name !== originalName) {
             const existing = await Course.findOne({ name, tenantId });
             if(existing) {
@@ -188,6 +174,12 @@ const updateCourse = async (req, res) => {
             data : course
         });
     } catch (err) {
+        if (err.name === 'CastError' || err.kind === 'ObjectId') {
+            return res.status(404).json({
+                success: false,
+                message: 'Course not found'
+            });
+        }
         res.status(500).json({
             success : false,
             message : err.message
@@ -206,6 +198,7 @@ const deleteCourse = async (req, res) => {
             });
         }
 
+        // FIND AND DELETE COURSE
         const course = await Course.findOneAndDelete({ _id: req.params.id, tenantId: tenantId });
         if (!course) {
             return res.status(404).json({
@@ -219,6 +212,12 @@ const deleteCourse = async (req, res) => {
             message: 'Course deleted successfully'
         });
     } catch (err) {
+        if (err.name === 'CastError' || err.kind === 'ObjectId') {
+            return res.status(404).json({
+                success: false,
+                message: 'Course not found'
+            });
+        }
         res.status(500).json({
             success: false,
             message: err.message

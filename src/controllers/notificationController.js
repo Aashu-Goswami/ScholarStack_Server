@@ -1,6 +1,8 @@
+// THIS MODULE HANDLES USER NOTIFICATION MANAGEMENT
+
 const Notification = require('../models/notification');
 
-// GET STUDENT IN-APP NOTIFICATIONS
+// GET ALL NOTIFICATIONS FOR THE LOGGED-IN USER
 const getMyNotifications = async (req, res) => {
     try {
         const tenantId = req.user.tenantId;
@@ -10,12 +12,13 @@ const getMyNotifications = async (req, res) => {
         const limit = parseInt(req.query.limit) || 10;
         const skip = (page - 1) * limit;
 
+        // BUILD FILTER 
         const filter = { userId };
-
         if (tenantId) {
             filter.tenantId = tenantId;
         }
 
+        // EXECUTE QUERY FOR NOTIFICATIONS
         const [notifications, total] = await Promise.all([
             Notification.find(filter)
                 .sort({ createdAt: -1 })
@@ -40,12 +43,13 @@ const getMyNotifications = async (req, res) => {
     }
 };
 
-// GET COUNT OF UNREAD NOTIFICATIONS FOR LOOGED-IN USER
+// GET COUNT OF UNREAD NOTIFICATIONS FOR LOGGED-IN USER
 const getUnreadCount = async (req, res) => {
     try {
         const tenantId = req.user.tenantId;
         const userId = req.user.id;
 
+        // BUILD FILTER
         const filter = { userId, isRead : false };
         if(tenantId) {
             filter.tenantId = tenantId;
@@ -65,7 +69,7 @@ const getUnreadCount = async (req, res) => {
     }
 };
 
-// MARK NOTIFICATION AS READ
+// MARK A SINGLE NOTIFICATION AS READ
 const markAsRead = async (req, res) => {
     try {
         const notification = await Notification.findOneAndUpdate(
@@ -87,6 +91,12 @@ const markAsRead = async (req, res) => {
             data: notification
         });
     } catch (err) {
+        if (err.name === 'CastError' || err.kind === 'ObjectId') {
+            return res.status(404).json({
+                success: false,
+                message: 'Notification not found'
+            });
+        }
         res.status(500).json({
             success: false,
             message: err.message
@@ -100,11 +110,13 @@ const markAllAsRead = async (req, res) => {
         const tenantId = req.user.tenantId;
         const userId = req.user.id;
 
+        // BUILD FILTER 
         const filter = { userId, isRead : false};
         if(tenantId) {
             filter.tenantId = tenantId;
         }
 
+        // UPDATE ALL MATCHING NOTIFICATIONS
         const result = await Notification.updateMany(
             filter,
             { isRead : true, readAt : new Date() }
@@ -143,6 +155,12 @@ const deleteNotification = async (req, res) => {
             message : 'Notification deleted successfully'
         });
     } catch (err) {
+        if (err.name === 'CastError' || err.kind === 'ObjectId') {
+            return res.status(404).json({
+                success: false,
+                message: 'Notification not found'
+            });
+        }
         res.status(500).json({
             success : false,
             message : err.message

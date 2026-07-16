@@ -1,3 +1,5 @@
+// AUDIT LOG MODEL 
+
 const mongoose = require('mongoose');
 
 const auditLogSchema = new mongoose.Schema(
@@ -37,7 +39,7 @@ const auditLogSchema = new mongoose.Schema(
             type : String,
             default : '',
             trim : true,
-            maxlength : [500, 'Remarks cannot exceed 500 characters']
+            maxlength : [250, 'Remarks cannot exceed 250 characters']
         }
     },
     {
