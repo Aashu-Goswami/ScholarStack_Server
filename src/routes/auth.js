@@ -8,7 +8,8 @@ const {
     verifyEmail,
     changePassword,
     registerInstitutionAdmin,
-    addInstitutionAdmin
+    addInstitutionAdmin,
+    getAdmins
 } = require('../controllers/authController');
 
 const { protect } = require('../middleware/authMiddleware');
@@ -29,5 +30,6 @@ router.post('/register/admin', protect, superAdminOnly, registerInstitutionAdmin
 
 // CREATE ADDITIONAL INSTITUTION ADMIN - ONLY INSTITUTION ADMIN
 router.post('/add-admin', protect, instAdminOnly, addInstitutionAdmin);
+router.get('/admins', protect, instAdminOnly, getAdmins);
 
 module.exports = router;

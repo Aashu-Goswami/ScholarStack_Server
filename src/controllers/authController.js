@@ -560,6 +560,34 @@ const addInstitutionAdmin = async (req, res) => {
     }
 };
 
+// GET ALL ADMINS FOR THE INSTITUTION 
+const getAdmins = async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId;
+    if (!tenantId) {
+      return res.status(403).json({
+        success: false,
+        message: 'Admin does not belong to any institution',
+      });
+    }
+
+    const admins = await User.find({ tenantId, role: 'instAdmin' })
+      .select('name email isEmailVerified createdAt')
+      .sort({ createdAt: -1 });
+
+    res.status(200).json({
+      success: true,
+      count: admins.length,
+      data: admins,
+    });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      message: err.message,
+    });
+  }
+};
+
 module.exports = {
     registerStudent,
     login,
@@ -568,5 +596,6 @@ module.exports = {
     verifyEmail,
     changePassword,
     registerInstitutionAdmin,
-    addInstitutionAdmin
+    addInstitutionAdmin,
+    getAdmins
 };
