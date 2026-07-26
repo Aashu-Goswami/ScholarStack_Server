@@ -4,6 +4,29 @@
 
 const Institution = require('../models/institution');
 
+// GET INSTITUIONS FOR LANDING PAGE - NO AUTHENTICATION
+const getPublicInstitutions = async (req, res) => {
+  try {
+    const totalCount = await Institution.countDocuments({ isActive: true });
+
+    const institutions = await Institution.find({ isActive: true })
+      .select('name address logo')
+      .limit(8)
+      .sort({ createdAt: -1 });
+
+    res.status(200).json({
+      success: true,
+      data: institutions,
+      totalCount,
+    });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      message: err.message,
+    });
+  }
+};
+
 // GET ALL INSTITUTIONS FUNCTION
 const getInstitutions = async (req, res) => {
     try {
@@ -202,6 +225,7 @@ const deleteInstitution = async (req, res) => {
 };
 
 module.exports = {
+    getPublicInstitutions,
     getInstitutions,
     getInstitutionById,
     createInstitution,

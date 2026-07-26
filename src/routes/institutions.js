@@ -10,6 +10,8 @@ const {
 const { protect } = require('../middleware/authMiddleware');
 const { superAdminOnly, superAdminOrOwnInstitution } = require('../middleware/roleCheckerMiddleware');
 
+router.get('/public', getPublicInstitutions);
+
 // PROTECTED ROUTES - SUPER ADMIN ONLY
 router.get('/', protect, superAdminOnly, getInstitutions);
 router.post('/', protect, superAdminOnly, createInstitution);
