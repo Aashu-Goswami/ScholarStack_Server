@@ -145,7 +145,7 @@ const updateCourse = async (req, res) => {
         const originalName = course.name;
 
         // EXTRACT UPDATABLE FIELDS
-        const { name, description, eligibilityCriteria, admissionCapacity, requiredDocuments, session } = req.body;
+        const { name, description, eligibilityCriteria, admissionCapacity, requiredDocuments, session, isActive } = req.body;
 
         // UPDATE PROVIDED FIELDS
         if (name) course.name = name;
@@ -154,6 +154,7 @@ const updateCourse = async (req, res) => {
         if (admissionCapacity !== undefined) course.admissionCapacity = admissionCapacity;
         if (requiredDocuments) course.requiredDocuments = requiredDocuments;
         if (session) course.session = session;
+        if (isActive !== undefined) course.isActive = isActive;
 
         // CHECK UNIQUENESS IF NAME IS BEING CHANGED
         if(name && name !== originalName) {
