@@ -22,7 +22,7 @@ const generateApplicationUpdateMessage = async ({
     remarks
 }) => {
     try {
-        const model = getGenAI().getGenerativeModel({ model: 'gemini-3.5-flash' });
+        const model = getGenAI().getGenerativeModel({ model: 'gemini-3.5-flash-lite' });
 
         const prompt = `
         You are an academic admissions assistant. Generate a professional and personalized email and in-app notification to a student about their application status update.
