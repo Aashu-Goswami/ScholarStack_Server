@@ -33,6 +33,7 @@ const seedData = async () => {
         console.log('Old data cleared');
 
         const institution1 = await Institution.create({
+            _id: '65c82e0cf0d7db31792a0d1f',
             name: 'VJTI Mumbai',
             subdomain: 'vjti',
             contactEmail: 'admin@vjti.edu.in',
