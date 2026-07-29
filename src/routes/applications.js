@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const {
+  createOrGetDraft,
   submitApplication,
   saveDraft,
   getMyApplication,
@@ -25,6 +26,7 @@ router.post('/:id/generate-message', protect, instAdminOnly, generateApplication
 router.get('/admin/filter', protect, instAdminOnly, filterApplications);
 
 // STUDENT ROUTES
+router.post('/draft', protect, studentOnly, createOrGetDraft);
 router.post('/', protect, studentOnly, submitApplication);
 router.put('/:id/draft', protect, studentOnly, saveDraft);
 router.get('/my', protect, studentOnly, getMyApplication);
