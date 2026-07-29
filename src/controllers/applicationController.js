@@ -23,136 +23,195 @@ const STATUS_TRANSITIONS = {
 
 const VALID_STATUSES = ['draft', 'submitted', 'under_review', 'verified', 'admitted', 'rejected'];
 
-// GET APPLICATION TIMELINE - RETURNS AUDIT LOG ENTRIES IN CHRONOLOGICAL ORDER (OLDER FIRST)
-const getApplicationTimeline = async (req, res) => {
+// CREATE (OR RETURN EXISTING) DRAFT APPLICATION FOR A COURSE - STUDENT ONLY
+// Idempotent: if the student already has a draft for this course, that
+// draft is returned instead of creating a duplicate. This is what the
+// application form uses to obtain an applicationId before any documents
+// can be uploaded against it.
+const createOrGetDraft = async (req, res) => {
     try {
-        const { id } = req.params;
-        const user = req.user;
-
-        // BUILD FILTER BASED ON USER ROLE 
-        const filter = { _id : id };
-
-        // STUDENTS CAN ONLY VIEW THEIR OWN APPLICATIONS
-        if(user.role === 'student') {
-            filter.applicantId = user.id;
-        }
-
-        // INSTITUTION ADMINS AND SUPER ADMINS CAN VIEW ALL APPLICATIONS WITHIN THEIR TENANT
-        if(user.role === 'instAdmin' || user.role === 'superAdmin') {
-            if(user.role === 'instAdmin') {
-                filter.tenantId = user.tenantId;
-            }
-        }
-
-        // VERIFY APPLICATION EXISTS AND USER HAS ACCESS
-        const application = await Application.findOne(filter);
-        if(!application) {
-            return res.status(404).json({
-                success : false,
-                message : 'Application not found or access denied'
+        const tenantId = await resolveTenantFromSubdomain(req);
+        if (!tenantId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid institution subdomain'
             });
         }
 
-        // FETCH AUDIT LOG ENTRIES FOR THIS APPLICATION
-        const timeline = await AuditLog.find({
-            applicationId : id,
-            tenantId : application.tenantId
-        })
-            .populate('changedBy', 'name email role')
-            .sort({ changedAt : 1 });
-
-        res.status(200).json({
-            success : true,
-            count : timeline.length,
-            data : timeline
-        });
-    } catch (err) {
-        res.status(500).json({
-            success : false,
-            message : err.message
-        });
-    }
-};
-
-// GET WORKFLOW STATUSES AND TRANSITIONS - RETURNS ALL VALID STATUSES, THEIR LABEL
-const getWorkflowStatuses = async (req, res) => {
-    try {
-        // DEFINE LABELS FOR EACH STATUS FOR FRONTEND DISPLAY PURPOSES
-        const statusLabels = {
-            draft: 'Draft',
-            submitted: 'Submitted',
-            under_review: 'Under Review',
-            verified: 'Verified',
-            admitted: 'Admitted',
-            rejected: 'Rejected'
-        };
-
-        // BUILD TRANSITIONS WITH LABELS FOR FRONTEND DISPLAY
-        const transitions = {};
-        for(const [from, toList] of Object.entries(STATUS_TRANSITIONS)) {
-            transitions[from] = toList.map(to => ({
-                from,
-                to,
-                label : `${statusLabels[from]} → ${statusLabels[to]}`
-            }));
+        const { courseId, session } = req.body;
+        if (!courseId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Please provide a course ID'
+            });
         }
 
-        res.status(200).json({
-            success : true,
-            data : {
-                statuses : VALID_STATUSES.map(status => ({
-                    value : status,
-                    label : statusLabels[status],
-                    isTerminal : STATUS_TRANSITIONS[status]?.length === 0 || false
-                })),
-                transitions,
-                flow : [
-                    { from: 'draft', to: 'submitted' },
-                    { from: 'submitted', to: 'under_review' },
-                    { from: 'submitted', to: 'rejected' },
-                    { from: 'under_review', to: 'verified' },
-                    { from: 'under_review', to: 'rejected' },
-                    { from: 'verified', to: 'admitted' },
-                    { from: 'verified', to: 'rejected' }
-                ]
-            }
+        const course = await Course.findOne({ _id: courseId, tenantId });
+        if (!course) {
+            return res.status(404).json({
+                success: false,
+                message: 'Course not found for this institution'
+            });
+        }
+
+        // IF THE STUDENT ALREADY MOVED PAST DRAFT FOR THIS COURSE, DON'T ALLOW A NEW ONE
+        const existingActive = await Application.findOne({
+            tenantId,
+            courseId,
+            applicantId: req.user.id,
+            status: { $in: ['submitted', 'under_review', 'verified', 'admitted'] }
+        });
+        if (existingActive) {
+            return res.status(400).json({
+                success: false,
+                message: 'You have already applied for this course'
+            });
+        }
+
+        // REUSE AN EXISTING DRAFT IF ONE EXISTS
+        let application = await Application.findOne({
+            tenantId,
+            courseId,
+            applicantId: req.user.id,
+            status: 'draft'
+        });
+
+        if (application) {
+            return res.status(200).json({
+                success: true,
+                message: 'Existing draft application found',
+                data: application
+            });
+        }
+
+        application = await Application.create({
+            tenantId,
+            courseId,
+            applicantId: req.user.id,
+            personalDetails: {},
+            documents: [],
+            session: session || course.session || '',
+            status: 'draft'
+        });
+
+        res.status(201).json({
+            success: true,
+            message: 'Draft application created',
+            data: application
         });
     } catch (err) {
         res.status(500).json({
-            success : false,
-            message : err.message
+            success: false,
+            message: err.message
         });
     }
 };
 
 // SUBMIT A NEW APPLICATION - STUDENT ONLY FINAL SUBMISSION
+// If `applicationId` is provided in the body and belongs to a draft owned
+// by this student, that draft is converted to 'submitted' in place instead
+// of creating a brand-new record (this is what lets the draft ->
+// documents -> submit flow work without orphaning the draft). If no
+// applicationId is given, behavior is unchanged from before: a new
+// application is created directly with status 'submitted'.
 const submitApplication = async (req, res) => {
     try {
         // RESOLVE TENANT FROM SUBDOMAIN
         const tenantId = await resolveTenantFromSubdomain(req);
         if (!tenantId) {
             return res.status(400).json({
-                success : false,
-                message : 'Invalid institution subdomain'
+                success: false,
+                message: 'Invalid institution subdomain'
             });
         }
 
-        const { courseId, personalDetails, documents, session } = req.body;
+        const { applicationId, courseId, personalDetails, documents, session } = req.body;
 
-        // VALIDATE COURSE ID IS PROVIDED
+        // ---- PATH A: CONVERTING AN EXISTING DRAFT INTO A SUBMISSION ----
+        if (applicationId) {
+            const draft = await Application.findOne({
+                _id: applicationId,
+                tenantId,
+                applicantId: req.user.id
+            });
+
+            if (!draft) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Application not found'
+                });
+            }
+
+            if (draft.status !== 'draft') {
+                return res.status(400).json({
+                    success: false,
+                    message: 'This application has already been submitted'
+                });
+            }
+
+            const course = await Course.findOne({ _id: draft.courseId, tenantId });
+            if (!course) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Course not found for this institution'
+                });
+            }
+
+            // Update draft fields to submission values
+            draft.personalDetails = personalDetails || draft.personalDetails || {};
+            draft.documents = documents || draft.documents || [];
+            draft.session = session || draft.session || course.session || '';
+            draft.status = 'submitted';
+            draft.submittedAt = new Date();
+
+            await draft.save();
+
+            await AuditLog.create({
+                tenantId,
+                applicationId: draft._id,
+                fromStatus: 'draft',
+                toStatus: 'submitted',
+                changedBy: req.user.id,
+                remarks: 'Draft application submitted by student'
+            });
+
+            await triggerNotification({
+                userId: req.user.id,
+                tenantId: draft.tenantId,
+                type: 'application_submitted',
+                title: 'Application Submitted',
+                message: `Your application for ${course.name} has been submitted successfully.`,
+                email: req.user.email,
+                emailSubject: `Application Submitted: ${course.name}`,
+                emailMessage: `Dear ${req.user.name},\n\nYour application for the course "${course.name}" has been submitted successfully. \n\nWe will review your application and notify you of the outcome.\n\nThank you for applying.\n\nBest regards,\n${course.name} Admissions Team`,
+                metadata: {
+                    applicationId: draft._id,
+                    courseName: course.name
+                },
+                sourceId: draft._id,
+                sourceModel: 'Application'
+            });
+
+            return res.status(200).json({
+                success: true,
+                message: 'Application submitted successfully',
+                data: draft
+            });
+        }
+
+        // ---- PATH B: STANDARD DIRECT SUBMISSION (NO PRE-EXISTING DRAFT) ----
         if (!courseId) {
             return res.status(400).json({
-                success : false,
-                message : 'Please provide a course ID'
+                success: false,
+                message: 'Please provide a course ID'
             });
         }
 
-        // VERIFIES WHETHER THE COURSE EXISTS UNDER THIS TENANT
         const course = await Course.findOne({ _id: courseId, tenantId });
         if (!course) {
             return res.status(404).json({
-                success : false,
-                message : 'Course not found for this institution'
+                success: false,
+                message: 'Course not found for this institution'
             });
         }
 
@@ -160,43 +219,42 @@ const submitApplication = async (req, res) => {
         const existingApplication = await Application.findOne({
             tenantId,
             courseId,
-            applicantId : req.user.id,
-            status : { $in: ['submitted', 'under_review', 'verified', 'admitted'] }
+            applicantId: req.user.id,
+            status: { $in: ['submitted', 'under_review', 'verified', 'admitted'] }
         });
         if (existingApplication) {
             return res.status(400).json({
-                success : false,
-                message : 'You have already applied for this course'
+                success: false,
+                message: 'You have already applied for this course'
             });
         }
 
         // VALIDATE REQUIRED FIELDS BASED ON THE FORM TEMPLATE
-        const template = await FormTemplate.findOne({ courseId, tenantId }).sort({ createdAt : -1 });
-        if(template) {
-            for(let field of template.fields) {
+        const template = await FormTemplate.findOne({ courseId, tenantId }).sort({ createdAt: -1 });
+        if (template) {
+            for (let field of template.fields) {
                 const isRequired = field.validation && field.validation.required;
-                if(isRequired) {
+                if (isRequired) {
                     const value = personalDetails ? personalDetails[field.fieldKey] : undefined;
-                    if(value === undefined || value === null || value === '') {
+                    if (value === undefined || value === null || value === '') {
                         return res.status(400).json({
-                            success : false,
-                            message : `Field ${field.label} is required`
+                            success: false,
+                            message: `Field ${field.label} is required`
                         });
                     }
                 }
             }
         }
 
-        // CREATE NEW APPLICATION RECORD WITH STATUS 'submitted' AND LOG THE ACTION IN AUDIT LOG
         const application = await Application.create({
             tenantId,
             courseId,
-            applicantId : req.user.id,
-            personalDetails : personalDetails || {},
-            documents : documents || [],
-            session : session || course.session || '',
-            status : 'submitted',
-            submittedAt : new Date()
+            applicantId: req.user.id,
+            personalDetails: personalDetails || {},
+            documents: documents || [],
+            session: session || course.session || '',
+            status: 'submitted',
+            submittedAt: new Date()
         });
 
         await AuditLog.create({
@@ -208,7 +266,6 @@ const submitApplication = async (req, res) => {
             remarks: 'Application submitted by student'
         });
 
-        // TRIGGER NOTIFICATION TO STUDENT AND SEND EMAIL
         await triggerNotification({
             userId: req.user.id,
             tenantId: application.tenantId,
@@ -227,14 +284,14 @@ const submitApplication = async (req, res) => {
         });
 
         res.status(201).json({
-            success : true,
-            message : 'Application submitted successfully',
-            data : application
+            success: true,
+            message: 'Application submitted successfully',
+            data: application
         });
     } catch (err) {
         res.status(500).json({
-            success : false,
-            message : err.message
+            success: false,
+            message: err.message
         });
     }
 };
@@ -614,6 +671,7 @@ const generateApplicationMessage = async (req, res) => {
 };
 
 module.exports = {
+    createOrGetDraft,
     submitApplication,
     saveDraft,
     getMyApplication,
