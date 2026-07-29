@@ -1,21 +1,18 @@
 // AI DOCUMENT EXTRACTION SERVICE
-// EXTRACTS TEXT FROM AN UPLOADED DOCUMENT (IMAGE OR PDF), THEN SENDS THAT
-// TEXT TO GROQ AND ASKS IT TO EXTRACT STRUCTURED APPLICATION-FORM DATA
+// EXTRACTS TEXT FROM AN UPLOADED DOCUMENT (IMAGE OR PDF) VIA OCR, THEN SENDS
+// THAT TEXT TO GROQ AND ASKS IT TO EXTRACT STRUCTURED APPLICATION-FORM DATA
 // (NAME, DOB, MARKS, ETC.) AS STRICT JSON.
 //
 // Requires GROQ_API_KEY in .env. Get one from https://console.groq.com/keys
 //
-// NOTE ON PDFs: Only digitally-generated PDFs (with embedded/native text)
-// are supported. Scanned/image-only PDFs are rejected with a 422 asking the
-// user to upload a digital PDF or an image instead. We intentionally do NOT
-// rasterize PDF pages to images for OCR — that previously required pdf2pic
-// plus system-level GraphicsMagick/Ghostscript binaries, which complicates
-// deployment on platforms like Render/Railway. Keeping the dependency set to
-// groq-sdk, pdf-parse, and tesseract.js only makes deployment simpler.
+// IMPORTANT: Tesseract.js can only OCR raster images (PNG/JPG buffers), it
+// cannot read PDF files directly. For scanned/image-only PDFs we first
+// rasterize each page to an image using pdf2pic, then OCR each page image.
 
 const Groq = require("groq-sdk");
 const pdfParse = require("pdf-parse");
 const Tesseract = require("tesseract.js");
+const { fromBuffer } = require("pdf2pic");
 
 let groqClient = null;
 
@@ -100,9 +97,33 @@ async function extractPdfText(buffer) {
         const parsed = await pdfParse(buffer);
         return (parsed.text || '').trim();
     } catch (e) {
-        // Malformed / non-standard PDF — treat as no native text.
+        // Malformed / non-standard PDF — treat as no native text, let the
+        // caller fall back to OCR.
         return '';
     }
+}
+
+/**
+ * Rasterizes every page of a PDF buffer into an image buffer using pdf2pic.
+ * This is required because Tesseract.js cannot read PDF files directly —
+ * it only understands raster images (PNG/JPEG/etc).
+ * @param {Buffer} buffer - raw PDF bytes
+ * @returns {Promise<Buffer[]>} array of page image buffers, in page order
+ */
+async function convertPdfToImages(buffer) {
+    const convert = fromBuffer(buffer, {
+        density: 200,        // DPI — higher improves OCR accuracy at the cost of speed
+        format: 'png',
+        width: 1654,          // ~200 DPI for an A4 page
+        height: 2339,
+    });
+
+    // -1 tells pdf2pic to convert ALL pages of the document.
+    const pages = await convert.bulk(-1, { responseType: 'buffer' });
+
+    return pages
+        .map((page) => page.buffer)
+        .filter((pageBuffer) => Buffer.isBuffer(pageBuffer) && pageBuffer.length > 0);
 }
 
 /**
@@ -120,11 +141,11 @@ async function ocrImage(imageBuffer) {
 
 /**
  * Extracts raw text from the uploaded document.
- * - PDFs: extract native/embedded text via pdf-parse only. If the extracted
- *   text is empty or too short (<=20 chars), the PDF is treated as
- *   scanned/image-only and rejected with a 422 — we do NOT rasterize PDF
- *   pages or run OCR on PDFs, since that would require pdf2pic plus system
- *   GraphicsMagick/Ghostscript binaries.
+ * - PDFs: try pdf-parse first (fast, works for text-based/digital PDFs).
+ *   If the extracted text is empty or too short (<20 chars), the PDF is
+ *   likely scanned/image-only, so every page is rasterized to an image via
+ *   pdf2pic and OCR'd individually with Tesseract.js. All page text is
+ *   merged together in page order.
  * - Images (PNG/JPG/JPEG): OCR'd directly via Tesseract.js.
  * @param {Buffer} buffer
  * @param {string} mimetype
@@ -139,13 +160,23 @@ async function extractTextFromDocument(buffer, mimetype) {
         }
 
         // Native text extraction was empty or too small — likely a scanned
-        // PDF. We intentionally do not attempt OCR on PDFs; surface a clear,
-        // actionable error instead.
-        const err = new Error(
-            'This PDF appears to be scanned or image-only. Please upload a digital PDF or an image (PNG/JPG).'
-        );
-        err.statusCode = 422;
-        throw err;
+        // PDF. Rasterize each page to an image, then OCR each page image.
+        const pageImages = await convertPdfToImages(buffer);
+
+        if (pageImages.length === 0) {
+            // Could not rasterize any pages — nothing left to try.
+            return '';
+        }
+
+        const pageTexts = [];
+        for (const pageImageBuffer of pageImages) {
+            const pageText = await ocrImage(pageImageBuffer);
+            if (pageText) {
+                pageTexts.push(pageText);
+            }
+        }
+
+        return pageTexts.join('\n\n');
     }
 
     // Images: png, jpg, jpeg — OCR directly. Never a PDF buffer here.
@@ -165,7 +196,7 @@ async function extractApplicationFields(buffer, mimetype, templateFields) {
     const fields = buildFieldList(templateFields);
     const prompt = buildPrompt(fields);
 
-    // Step 1: get raw text out of the document (native PDF text, or OCR for images).
+    // Step 1: get raw text out of the document (native PDF text, or OCR).
     const documentText = await extractTextFromDocument(buffer, mimetype);
 
     if (!documentText || documentText.trim().length === 0) {
