@@ -22,7 +22,6 @@ const generateApplicationUpdateMessage = async ({
     remarks
 }) => {
     try {
-        // Fallbacks dynamically to gemini-3.5-flash-lite if GEMINI_MODEL is not set in env
         const modelName = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
         const model = getGenAI().getGenerativeModel({ model: modelName });
 
