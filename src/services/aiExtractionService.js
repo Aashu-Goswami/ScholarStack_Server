@@ -32,6 +32,53 @@ function getClient() {
     return groqClient;
 }
 
+// ─── Extraction Schemas per Document Type ──────────────
+const EXTRACTION_SCHEMAS = {
+    marksheet: {
+        description: 'a marksheet (academic transcript)',
+        fields: [
+            { fieldKey: 'studentName', label: 'Full name of the student', type: 'text' },
+            { fieldKey: 'rollNumber', label: 'Roll number', type: 'text' },
+            { fieldKey: 'totalMarks', label: 'Total marks obtained (numeric)', type: 'number' },
+            { fieldKey: 'percentage', label: 'Percentage (numeric, no % sign)', type: 'number' },
+            { fieldKey: 'board', label: 'Exam board (e.g., CBSE, ICSE, State Board)', type: 'text' },
+            { fieldKey: 'year', label: 'Year of passing (numeric)', type: 'number' },
+        ],
+    },
+    certificate: {
+        description: 'a certificate (e.g., migration, transfer, caste, income)',
+        fields: [
+            { fieldKey: 'studentName', label: 'Full name of the student', type: 'text' },
+            { fieldKey: 'certificateName', label: 'Name/type of certificate', type: 'text' },
+            { fieldKey: 'issueDate', label: 'Date of issue (YYYY-MM-DD)', type: 'date' },
+            { fieldKey: 'issuingAuthority', label: 'Issuing authority name', type: 'text' },
+            { fieldKey: 'rollNumber', label: 'Roll number (if present)', type: 'text' },
+        ],
+    },
+    idProof: {
+        description: 'an identity proof (Aadhar, PAN, Passport, Voter ID)',
+        fields: [
+            { fieldKey: 'studentName', label: 'Full name on the ID', type: 'text' },
+            { fieldKey: 'idNumber', label: 'ID number', type: 'text' },
+            { fieldKey: 'idType', label: 'Type of ID (Aadhar, PAN, Passport, Voter ID)', type: 'text' },
+            { fieldKey: 'issueDate', label: 'Date of issue (YYYY-MM-DD)', type: 'date' },
+            { fieldKey: 'expiryDate', label: 'Date of expiry (YYYY-MM-DD)', type: 'date' },
+        ],
+    },
+    photo: {
+        description: 'a passport photo',
+        fields: [], // no structured extraction; could be extended with face detection later
+    },
+    other: {
+        description: 'other document',
+        fields: [
+            { fieldKey: 'studentName', label: 'Full name', type: 'text' },
+            { fieldKey: 'date', label: 'Date (YYYY-MM-DD) if present', type: 'date' },
+            { fieldKey: 'identifier', label: 'Any identifier number (roll/ID/registration)', type: 'text' },
+        ],
+    },
+};
+
 // GENERIC FIELD SET — MATCHES THE CURRENT (STATIC) STUDENT APPLICATION FORM.
 // Used when no course-specific form template is supplied.
 const GENERIC_FIELDS = [
@@ -71,6 +118,26 @@ Rules:
 - Dates must be formatted as YYYY-MM-DD.
 - Numeric fields (like percentage) must be plain numbers as strings, no "%" symbol.
 - Do not include any field not in the list above.`;
+}
+
+function buildVerificationPrompt(documentType) {
+    const schema = EXTRACTION_SCHEMAS[documentType] || EXTRACTION_SCHEMAS.other;
+    const fieldDescriptions = schema.fields
+        .map((f) => `- "${f.fieldKey}" (${f.type}): ${f.label}`)
+        .join('\n');
+
+    return `You are a document‑extraction assistant for a college admissions platform.
+    The uploaded document is ${schema.description}.
+
+    Extract the following fields from the document, if they are present:
+    ${fieldDescriptions}
+
+    Rules:
+    - Respond with ONLY a single JSON object — no markdown, no code fences, no commentary.
+    - Use exactly these field keys: ${schema.fields.map((f) => `"${f.fieldKey}"`).join(', ')}.
+    - If a field cannot be confidently found, omit that key entirely (do not guess).
+    - Dates must be formatted as YYYY-MM-DD.
+    - Numeric fields (percentage, totalMarks) must be plain numbers as strings, no "%" sign.`;
 }
 
 // Strips accidental markdown code fences before JSON.parse, in case the
@@ -261,4 +328,76 @@ Respond with ONLY valid JSON, no markdown, no code fences, no commentary.`;
     };
 }
 
-module.exports = { extractApplicationFields };
+async function extractDocumentFieldsForVerification(buffer, mimetype, documentType = 'other') {
+    const client = getClient();
+    const schema = EXTRACTION_SCHEMAS[documentType] || EXTRACTION_SCHEMAS.other;
+
+    if (documentType === 'photo') {
+        return { extractedFields: {}, fieldsAttempted: [] };
+    }
+
+    if (schema.fields.length === 0) {
+        return { extractedFields: {}, fieldsAttempted: [] };
+    }
+
+    const prompt = buildVerificationPrompt(documentType);
+
+    // Step 1: Get raw text from document
+    const documentText = await extractTextFromDocument(buffer, mimetype);
+    if (!documentText || documentText.trim().length === 0) {
+        const err = new Error('Could not read any text from the document. Please fill the form manually.');
+        err.statusCode = 422;
+        throw err;
+    }
+
+    // Step 2: Send to GROQ
+    const fullPrompt = `${prompt}
+
+Here is the text extracted from the uploaded document. Use your best judgment to identify the correct values.
+Never invent data that isn't actually present.
+
+--- BEGIN DOCUMENT TEXT ---
+${documentText}
+--- END DOCUMENT TEXT ---
+
+Respond with ONLY valid JSON, no markdown, no code fences, no commentary.`;
+
+    const completion = await client.chat.completions.create({
+        model: 'llama-3.3-70b-versatile',
+        messages: [{ role: 'user', content: fullPrompt }],
+    });
+
+    const responseText = completion.choices?.[0]?.message?.content || null;
+    if (!responseText) {
+        const err = new Error('AI extraction returned no readable response');
+        err.statusCode = 502;
+        throw err;
+    }
+
+    // Extract JSON from response
+    let extractedFields;
+    try {
+        extractedFields = extractJson(responseText);
+    } catch (parseErr) {
+        const err = new Error('Could not parse extracted data from the document. Please fill the form manually.');
+        err.statusCode = 422;
+        throw err;
+    }
+
+    // Keep only allowed keys
+    const allowedKeys = new Set(schema.fields.map((f) => f.fieldKey));
+    const filtered = Object.fromEntries(
+        Object.entries(extractedFields).filter(([k, v]) => allowedKeys.has(k) && v !== null && v !== '')
+    );
+
+    return {
+        extractedFields: filtered,
+        fieldsAttempted: schema.fields.map((f) => f.fieldKey),
+        documentType,
+    };
+}
+
+module.exports = { 
+    extractApplicationFields,
+    extractDocumentFieldsForVerification,
+};
