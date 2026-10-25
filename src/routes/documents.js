@@ -7,7 +7,8 @@ const {
   getDocuments,
   getDocumentById,
   updateDocumentStatus,
-  deleteDocument
+  deleteDocument,
+  verifyDocument
 } = require('../controllers/documentController');
 const { autofillFromDocument } = require('../controllers/aiAutofillController');
 const { protect } = require('../middleware/authMiddleware');
@@ -24,6 +25,7 @@ router.get('/single/:id', protect, getDocumentById);
 router.get('/:applicationId', protect, getDocuments);
 
 // INSTITUTION ADMIN ONLY
+router.post('/verify/:id', protect, instAdminOnly, verifyDocument);
 router.put('/:id/status', protect, instAdminOnly, updateDocumentStatus);
 router.delete('/:id', protect, instAdminOnly, deleteDocument);
 

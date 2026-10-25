@@ -3,8 +3,11 @@
 const Document = require('../models/document');
 const Application = require('../models/application');
 const User = require('../models/user');
+const path = require('path');
+const fs = require('fs');
 const { triggerNotification } = require('../services/notificationServices');
 const { resolveTenantFromSubdomain } = require('../middleware/tenantResolverMiddleware');
+const { extractDocumentFieldsForVerification } = require('../services/aiExtractionService');
 
 // UPLOAD A DOCUMENT FOR A STUDENT'S APPLICATION - STUDENT ONLY
 const uploadDocument = async (req, res) => {
@@ -372,10 +375,148 @@ const deleteDocument = async (req, res) => {
     }
 };
 
+// AI DOCUMENT VERIFIER - AI EXTRACTS STRUCTURED FIELDS FROM DOCUMENT AND RETURNS A REPORT
+const verifyDocument = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const tenantId = req.user.tenantId;
+
+        // FETCH DOCUMENT AND POPULATE ASSOCIATED APPLICATION
+        const document = await Document.findOne({ _id : id, tenantId })
+            .populate('applicationId');
+
+        if(!document) {
+            return res.status(404).json({
+                success : false,
+                message : 'Document not found'
+            });
+        }
+
+        const application = document.applicationId;
+        if(!application) {
+            return res.status(404).json({
+                success : false,
+                message : 'Associated Application not found'
+            });
+        }
+
+        // BUILD FILE PATH 
+        const filePath = path.join(__dirname, '..', document.fileUrl);
+        if(!fs.existsSync(filePath)) {
+            console.warn(`File not found at ${filePath}, attempting to read from database`);
+        } 
+
+        // READ FILE BUFFER
+        let fileBuffer;
+        try {
+            fileBuffer = fs.readFileSync(filePath);
+        } catch (readErr) {
+            return res.status(404).json({
+                success : false,
+                message : 'Document file not found on server'
+            });
+        }
+
+        // DETERMINE MIME TYPE
+        const mimeType = document.mimeType || 'application/octet-stream';
+
+        // CALL AI EXTRACTION SERVICE 
+        const documentType = document.type;
+        let extractionResult;
+        try {
+            extractionResult = await extractDocumentFieldsForVerification(
+                fileBuffer,
+                mimeType,
+                documentType
+            );
+        } catch (aiErr) {
+            console.error('AI extraction error:', aiErr);
+            return res.status(aiErr.statusCode || 422).json({
+                success : false,
+                message : aiErr.message || 'AI extraction failed, Please verify manually'
+            });
+        }
+
+        // COMPARE EXTRACTED FIELDS WITH APPLICATION DETAILS
+        const { extractedFields, fieldsAttempted } = extractionResult;
+        const expectedDetails = application.personalDetails || {};
+        const mismatches = [];
+
+        const fieldMapping = {
+            studentName : 'fullName',
+            rollNumber: 'rollNumber',
+            totalMarks: 'twelfthPercentage',    
+            percentage: 'twelfthPercentage',    
+            board: 'board',
+            year: 'year',
+            certificateName: 'certificateName',
+            issueDate: 'issueDate',
+            issuingAuthority: 'issuingAuthority',
+            idNumber: 'idNumber',
+            idType: 'idType',
+            expiryDate: 'expiryDate',
+        };
+
+        Object.keys(extractedFields).forEach((extractedKey) => {
+            const expectedKey = fieldMapping[extractedKey] || extractedKey;
+            if (expectedDetails[expectedKey] !== undefined) {
+                const expectedVal = String(expectedDetails[expectedKey]).trim();
+                const extractedVal = String(extractedFields[extractedKey]).trim();
+        
+                if (expectedVal.toLowerCase() !== extractedVal.toLowerCase()) {
+                    mismatches.push({
+                        field: expectedKey,
+                        expected: expectedDetails[expectedKey],
+                        extracted: extractedFields[extractedKey],
+                    });
+                }
+            }
+        });
+
+        if (expectedDetails.twelfthPercentage !== undefined && extractedFields.totalMarks !== undefined) {
+            const expectedNum = parseFloat(expectedDetails.twelfthPercentage);
+            const extractedNum = parseFloat(extractedFields.totalMarks);
+
+            if (!isNaN(expectedNum) && !isNaN(extractedNum) && Math.abs(expectedNum - extractedNum) > 2) {
+                const existing = mismatches.find(
+                    (m) => m.field === 'twelfthPercentage' || m.field === 'totalMarks'
+                );
+
+                if (!existing) {
+                    mismatches.push({
+                        field: 'twelfthPercentage (vs AI totalMarks)',
+                        expected: expectedDetails.twelfthPercentage,
+                        extracted: extractedFields.totalMarks,
+                    });
+                }
+            }
+        }
+        const verified = mismatches.length === 0;
+
+        // RETURN RESULT
+        res.status(200).json({
+            success: true,
+            data: {
+                verified,
+                extracted: extractedFields,
+                mismatches,
+                fieldsAttempted,
+            },
+        });
+    } catch (err) {
+        console.error('AI Document Verification Error:', err);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error while verifying document.',
+        });
+    }
+};
+
 module.exports = {
     uploadDocument,
     getDocuments,
     getDocumentById,
     updateDocumentStatus,
-    deleteDocument
+    deleteDocument,
+    verifyDocument
 };
